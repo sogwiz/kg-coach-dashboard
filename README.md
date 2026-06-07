@@ -1,6 +1,7 @@
 # KG Coach Dashboard
 
 A staff-level implementation of a knowledge-graph-backed AI coach dashboard: an **AI workout generator** and a **member-context copilot**, built on two knowledge graphs grounded in clinical ontologies (SNOMED CT, OPE, COPPER, SKOS, PROV-O). Safety is enforced **deterministically** via graph traversal — the LLM never sees unsafe exercises.
+[Video demo](https://www.loom.com/share/3deb3a9065fd48dda847d155d174d08c)
 
 ---
 
