@@ -1,0 +1,381 @@
+{
+  "_note": "Movement-type annotations for all exercises. Maps exercise id to per-joint movement types. Types: flexion, extension, rotation, load, impact. These drive the dynamic safety filter.",
+  "annotations": {
+    "0b3178cf-bf89-45a3-bfb0-27310ef6ef38": {
+      "name": "Barbell Decline Bench Press",
+      "joint_movements": {
+        "shoulder": ["flexion", "load"],
+        "elbow": ["extension", "load"]
+      }
+    },
+    "0e3201e9-4394-4902-a717-f4ce544d98de": {
+      "name": "Push-Up to Knee-Drive",
+      "joint_movements": {
+        "shoulder": ["flexion", "load"],
+        "elbow": ["extension", "load"],
+        "wrist": ["load"],
+        "hip": ["flexion"]
+      }
+    },
+    "0fa0eb42-797f-4752-9a80-68e2dfb2a935": {
+      "name": "Alternating Dumbbell Decline Bench Press",
+      "joint_movements": {
+        "shoulder": ["flexion", "load"],
+        "elbow": ["extension", "load"]
+      }
+    },
+    "13261989-7436-44d0-8daf-754b259e5af8": {
+      "name": "Dumbbell Incline Chest Fly",
+      "joint_movements": {
+        "shoulder": ["flexion", "load", "rotation"]
+      }
+    },
+    "1465f189-eb62-410d-a73e-590a84693dd0": {
+      "name": "Dumbbell Neutral-Grip Bench Press",
+      "joint_movements": {
+        "shoulder": ["flexion", "load"],
+        "elbow": ["extension", "load"],
+        "wrist": ["load"]
+      }
+    },
+    "0a5efec6-b142-4a20-8c6d-5829ddc248af": {
+      "name": "Isometric Pull-Up",
+      "joint_movements": {
+        "shoulder": ["extension", "load"],
+        "elbow": ["flexion", "load"],
+        "wrist": ["load"]
+      }
+    },
+    "0b6fcb1c-aa47-455b-8a9f-f9d1582745df": {
+      "name": "Band-Assisted Chin-Up (From Foot)",
+      "joint_movements": {
+        "shoulder": ["extension", "load"],
+        "elbow": ["flexion", "load"],
+        "wrist": ["load"]
+      }
+    },
+    "0fb071d6-2ca0-46ac-a855-83a0029b2ccc": {
+      "name": "Machine - Single-Arm Lat Pull-Down",
+      "joint_movements": {
+        "shoulder": ["extension", "load"],
+        "elbow": ["flexion", "load"]
+      }
+    },
+    "12918da8-e735-45e3-9185-8f6c074397a3": {
+      "name": "Kneeling Stability Ball Lat Stretch",
+      "joint_movements": {
+        "shoulder": ["flexion"],
+        "knee": ["flexion"],
+        "hip": ["flexion"]
+      }
+    },
+    "01128a8f-44a4-43ae-a172-b6a32b2e8534": {
+      "name": "Med Ball Scoop Toss",
+      "joint_movements": {
+        "knee": ["flexion", "extension", "load", "impact"],
+        "hip": ["flexion", "extension", "load"],
+        "shoulder": ["flexion", "load"],
+        "elbow": ["extension"]
+      }
+    },
+    "03258dbf-bc21-4495-bcae-ca627b3a0f20": {
+      "name": "Alternating Dumbbell Overhead Press",
+      "joint_movements": {
+        "shoulder": ["flexion", "load"],
+        "elbow": ["extension", "load"]
+      }
+    },
+    "0a2dc786-fb42-4571-9b26-f58cdeb2c70e": {
+      "name": "Bodyweight Pike",
+      "joint_movements": {
+        "hip": ["flexion"],
+        "shoulder": ["load"],
+        "wrist": ["load"]
+      }
+    },
+    "0b1250ab-ac21-42a3-8aff-87f75e85eea0": {
+      "name": "Bench-Supported Incline YTI",
+      "joint_movements": {
+        "shoulder": ["rotation", "extension"],
+        "cervical_spine": ["extension"]
+      }
+    },
+    "004717c7-4e34-4a26-978f-50106f09abcc": {
+      "name": "Wide-Grip Preacher Curl with EZ Bar",
+      "joint_movements": {
+        "elbow": ["flexion", "load"]
+      }
+    },
+    "12b80a72-6c2f-43f0-b3bd-6b11e14e3358": {
+      "name": "Resistance Band Reverse Curl",
+      "joint_movements": {
+        "elbow": ["flexion", "load"]
+      }
+    },
+    "14a8ad1b-09c9-4572-860c-9d6b231a3a72": {
+      "name": "Single-Arm Dumbbell Preacher Curl",
+      "joint_movements": {
+        "elbow": ["flexion", "load"]
+      }
+    },
+    "0aa65232-8367-4622-b0ef-37e31626ba65": {
+      "name": "Bench-Lying Single-Arm Dumbbell Tricep Extension",
+      "joint_movements": {
+        "elbow": ["extension", "load"],
+        "shoulder": ["load"]
+      }
+    },
+    "12fe4a7f-cdf9-411e-9272-868a74debfeb": {
+      "name": "Single-Arm Cable Tricep Extension",
+      "joint_movements": {
+        "elbow": ["extension", "load"]
+      }
+    },
+    "297668c1-4006-4280-8208-ea3cd99d3264": {
+      "name": "Suspension Tricep Press",
+      "joint_movements": {
+        "shoulder": ["flexion", "load"],
+        "elbow": ["extension", "load"],
+        "hip": ["extension"]
+      }
+    },
+    "00036a08-7c22-42e4-8fe5-323b53e31667": {
+      "name": "Kettlebell Goblet Cyclist Squat",
+      "joint_movements": {
+        "knee": ["flexion", "load"],
+        "hip": ["flexion", "load"],
+        "ankle": ["flexion", "load"]
+      }
+    },
+    "00cc383b-f156-4b23-952a-15340100c261": {
+      "name": "RNT Split Squat",
+      "joint_movements": {
+        "knee": ["flexion", "load"],
+        "hip": ["flexion", "load"],
+        "ankle": ["flexion"]
+      }
+    },
+    "01ff62bc-e887-49e4-9cc8-bcd367b34cfd": {
+      "name": "Static Jump",
+      "joint_movements": {
+        "knee": ["flexion", "extension", "load", "impact"],
+        "hip": ["flexion", "extension"],
+        "ankle": ["flexion", "extension", "impact"]
+      }
+    },
+    "0252c3c1-435f-49a2-9f79-5ef53eec3b1b": {
+      "name": "Med Ball Split Squat",
+      "joint_movements": {
+        "knee": ["flexion", "load"],
+        "hip": ["flexion", "load"],
+        "ankle": ["flexion"]
+      }
+    },
+    "02fe4cf5-bb21-4bef-868f-fea1477e2a53": {
+      "name": "Dumbbell Goblet Split Squat",
+      "joint_movements": {
+        "knee": ["flexion", "load"],
+        "hip": ["flexion", "load"],
+        "ankle": ["flexion"]
+      }
+    },
+    "0732c6eb-2275-4af3-8276-9bb8be2aa12d": {
+      "name": "One-Kettlebell Hamstring Walkout",
+      "joint_movements": {
+        "knee": ["extension"],
+        "hip": ["flexion", "extension", "load"],
+        "ankle": ["flexion"]
+      }
+    },
+    "0a4d99cf-5075-468e-9551-b9f8efa267f1": {
+      "name": "World's Greatest Stretch",
+      "joint_movements": {
+        "hip": ["flexion", "rotation"],
+        "thoracic_spine": ["rotation"],
+        "knee": ["flexion"],
+        "ankle": ["flexion"]
+      }
+    },
+    "1423ff58-68de-47da-8884-cb6f438f5774": {
+      "name": "Walking Toe Touches",
+      "joint_movements": {
+        "hip": ["flexion"],
+        "lumbar_spine": ["flexion"],
+        "shoulder": ["flexion"]
+      }
+    },
+    "2248e07a-93de-4da1-ad20-aff27537a99a": {
+      "name": "Med Ball Hamstring Walkout",
+      "joint_movements": {
+        "knee": ["extension"],
+        "hip": ["flexion", "extension", "load"],
+        "ankle": ["flexion"]
+      }
+    },
+    "00678525-7d38-4a9e-8998-a299a209c724": {
+      "name": "Alternating Dumbbell Racked Crossback Lunge",
+      "joint_movements": {
+        "knee": ["flexion", "load"],
+        "hip": ["flexion", "load", "rotation"],
+        "ankle": ["flexion"]
+      }
+    },
+    "00a510b1-4676-4433-a37d-30f63e1b8a4f": {
+      "name": "Stair Climber",
+      "joint_movements": {
+        "knee": ["flexion", "extension", "load"],
+        "hip": ["flexion", "extension"],
+        "ankle": ["flexion", "extension"]
+      }
+    },
+    "00b26731-066f-4b69-96e8-3472fc6fbc09": {
+      "name": "Barbell Racked Forward Lunge",
+      "joint_movements": {
+        "knee": ["flexion", "load"],
+        "hip": ["flexion", "load"],
+        "ankle": ["flexion"]
+      }
+    },
+    "00c7ac93-153e-4b96-be56-b4ca6b465369": {
+      "name": "Barbell Step Up to Knee-Drive",
+      "joint_movements": {
+        "knee": ["flexion", "extension", "load"],
+        "hip": ["flexion", "extension", "load"],
+        "ankle": ["flexion", "extension"]
+      }
+    },
+    "01e33d9f-3607-49db-bd59-af7f61d77300": {
+      "name": "Vertical Jump to Broad Jump",
+      "joint_movements": {
+        "knee": ["flexion", "extension", "load", "impact"],
+        "hip": ["flexion", "extension"],
+        "ankle": ["flexion", "extension", "impact"]
+      }
+    },
+    "00e18a26-70dd-4d43-b013-5038b75a41f3": {
+      "name": "Alternating Low Plank To Low Side Plank",
+      "joint_movements": {
+        "shoulder": ["load", "rotation"],
+        "elbow": ["load"]
+      }
+    },
+    "01f5a2bb-ecf7-4168-92b3-35bd78592e26": {
+      "name": "High Plank Bird Dog",
+      "joint_movements": {
+        "wrist": ["load"],
+        "shoulder": ["load"],
+        "knee": ["extension"]
+      }
+    },
+    "0333b0cc-4b43-45d9-adff-505b349e53d9": {
+      "name": "Sandbag Zercher Carry",
+      "joint_movements": {
+        "knee": ["flexion", "extension", "load"],
+        "hip": ["extension", "load"],
+        "shoulder": ["load"],
+        "ankle": ["load"]
+      }
+    },
+    "03ba2166-a5e6-4d0d-9110-ab5b73acdd50": {
+      "name": "BOSU Step Over",
+      "joint_movements": {
+        "knee": ["flexion", "extension", "impact"],
+        "hip": ["flexion", "extension"],
+        "ankle": ["flexion", "extension", "impact"],
+        "elbow": ["flexion"]
+      }
+    },
+    "01bc9947-23e6-4dcf-bf66-6381a2c29700": {
+      "name": "Jumping Jack",
+      "joint_movements": {
+        "ankle": ["flexion", "extension", "impact"],
+        "shoulder": ["flexion", "extension"],
+        "hip": ["flexion", "extension"]
+      }
+    },
+    "0a0b8a72-0bd4-41aa-9fac-e0b44356ca8f": {
+      "name": "Horizontal Leg Press Calf Raises",
+      "joint_movements": {
+        "ankle": ["flexion", "extension", "load"]
+      }
+    },
+    "10336de1-5994-4074-aa52-9b1b28d845a3": {
+      "name": "Jump Rope - Single-Leg",
+      "joint_movements": {
+        "ankle": ["flexion", "extension", "impact"]
+      }
+    },
+    "11afb04e-9b3d-413f-a4cc-8c03a2fb5d93": {
+      "name": "Lacrosse Ball Upper Back against Wall",
+      "joint_movements": {}
+    },
+    "12573626-5760-4d71-8cb5-e255daaa0b42": {
+      "name": "Single-Arm Chest-Supported Incline Row",
+      "joint_movements": {
+        "elbow": ["flexion", "load"],
+        "shoulder": ["extension", "load"]
+      }
+    },
+    "1abf5a3d-25ca-4ee8-89d9-d3d8c6a53691": {
+      "name": "Machine - Chest-Supported Row",
+      "joint_movements": {
+        "elbow": ["flexion", "load"],
+        "shoulder": ["extension", "load"]
+      }
+    },
+    "02d6478f-0579-480b-a188-8e719d4fda14": {
+      "name": "Low Copenhagen Plank",
+      "joint_movements": {
+        "knee": ["load"],
+        "hip": ["load"],
+        "shoulder": ["load"],
+        "ankle": ["load"]
+      }
+    },
+    "07772057-db56-4cfb-ae4b-f98f4cac6b9a": {
+      "name": "Anchored Band Rotational Lift",
+      "joint_movements": {
+        "shoulder": ["rotation", "flexion", "load"],
+        "thoracic_spine": ["rotation"]
+      }
+    },
+    "1965072a-7e34-4d37-98f5-bde8cb6629a4": {
+      "name": "Cow Pose",
+      "joint_movements": {
+        "lumbar_spine": ["extension"],
+        "hip": ["flexion"],
+        "knee": ["flexion"],
+        "ankle": ["flexion"]
+      }
+    },
+    "201032fe-3189-4c79-a69b-e67e2c7e9b81": {
+      "name": "SkiErg",
+      "joint_movements": {
+        "elbow": ["flexion", "extension"],
+        "shoulder": ["flexion", "extension"],
+        "hip": ["flexion", "extension"],
+        "wrist": ["load"]
+      }
+    },
+    "0a9d8d01-a52d-453e-92bc-dd9238e9a930": {
+      "name": "Ground Upper Trap Stretch",
+      "joint_movements": {
+        "cervical_spine": ["rotation", "flexion"]
+      }
+    },
+    "0b5f275e-db72-4dd7-8949-30d737fb14fc": {
+      "name": "Standing Neck Circles",
+      "joint_movements": {
+        "cervical_spine": ["flexion", "extension", "rotation"]
+      }
+    },
+    "0263d731-ceb6-41d0-b01f-88f0f177623b": {
+      "name": "Standing Miniband Hip Flexion",
+      "joint_movements": {
+        "hip": ["flexion"],
+        "knee": ["flexion"],
+        "ankle": ["flexion"]
+      }
+    }
+  }
+}

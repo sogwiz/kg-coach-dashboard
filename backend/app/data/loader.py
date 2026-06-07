@@ -18,13 +18,37 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _DATA_DIR = _REPO_ROOT / "data"
 
 _EXERCISES_PATH = _DATA_DIR / "exercises.json"
+_MOVEMENTS_PATH = _DATA_DIR / "exercise_movements.json"
 _MEMBER_PATH = _DATA_DIR / "member-context.json"
 
 
 def load_exercises() -> list[Exercise]:
-    """Load the exercise catalog from data/exercises.json."""
+    """
+    Load the exercise catalog from data/exercises.json and merge in
+    movement-type annotations from data/exercise_movements.json.
+
+    The joint_movements field is populated from the annotations file;
+    exercises without an annotation entry get an empty dict (safe default).
+    """
     raw = json.loads(_EXERCISES_PATH.read_text(encoding="utf-8"))
-    return [Exercise.model_validate(item) for item in raw]
+
+    # Load movement annotations if the file exists
+    joint_movements_by_id: dict[str, dict] = {}
+    if _MOVEMENTS_PATH.exists():
+        movements_raw = json.loads(_MOVEMENTS_PATH.read_text(encoding="utf-8"))
+        for ex_id, annotation in movements_raw.get("annotations", {}).items():
+            joint_movements_by_id[ex_id] = annotation.get("joint_movements", {})
+
+    exercises: list[Exercise] = []
+    for item in raw:
+        ex = Exercise.model_validate(item)
+        if ex.id in joint_movements_by_id:
+            ex = ex.model_copy(
+                update={"joint_movements": joint_movements_by_id[ex.id]}
+            )
+        exercises.append(ex)
+
+    return exercises
 
 
 def load_member_context() -> MemberContext:
