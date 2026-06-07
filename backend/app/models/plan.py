@@ -79,7 +79,26 @@ class PlannedExercise(BaseModel):
     sets: int = Field(ge=1)
     reps: int | None = Field(default=None, ge=1)
     duration_seconds: int | None = Field(default=None, ge=1)
+    # Cardio-machine / locomotion work is prescribed by distance or calories,
+    # never by reps. Exactly one work metric (reps | duration_seconds |
+    # distance_meters | calories) is set per exercise.
+    distance_meters: int | None = Field(
+        default=None, ge=1,
+        description="Distance per set for locomotion/erg work (e.g. row, run, sled). None unless distance-based.",
+    )
+    calories: int | None = Field(
+        default=None, ge=1,
+        description="Calories per set for erg/machine conditioning (e.g. rower, SkiErg, assault bike). None unless calorie-based.",
+    )
     rest_seconds: int = Field(default=60, ge=0)
+    intensity_pct: int | None = Field(
+        default=None, ge=1, le=100,
+        description=(
+            "Target intensity/effort as a percent — effort % for cardio/erg "
+            "intervals (e.g. 85), ~65 for Zone-2 steady-state. None when not "
+            "applicable (e.g. mobility)."
+        ),
+    )
     rationale: str = ""
     sequencing_rationale: str = Field(
         default="",

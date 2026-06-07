@@ -128,6 +128,12 @@ Your job:
 7. Assign realistic sets, reps (or duration_seconds), and rest periods.
    Cap loading relative to load_tolerance_pct (e.g. 70 % tolerance →
    moderate sets/reps, avoid near-maximal efforts).
+   - CARDIO MACHINES & LOCOMOTION (rower/Concept2, SkiErg, assault/echo bike,
+     treadmill/run, sled, jump rope): NEVER prescribe `reps` — reps are
+     meaningless on an erg. Leave `reps` null and instead set exactly ONE of
+     `calories` (ergs/bikes), `distance_meters` (running/sled/locomotion), or
+     `duration_seconds` (generic cardio), PLUS `intensity_pct` (target effort,
+     e.g. 80–90 for intervals, ~65 for Zone-2 / steady-state).
 
 8. Write the four session-level fields:
    - stimulus: the primary training stimulus in plain language

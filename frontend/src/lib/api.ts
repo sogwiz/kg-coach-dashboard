@@ -146,7 +146,10 @@ export interface PlannedExercise {
   sets: number;
   reps: number | null;
   duration_seconds: number | null;
+  distance_meters: number | null;
+  calories: number | null;
   rest_seconds: number;
+  intensity_pct: number | null;
   rationale: string;
   sequencing_rationale: string;
   sequencing_role: SequencingRole;
