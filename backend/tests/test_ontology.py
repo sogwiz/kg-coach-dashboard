@@ -48,8 +48,10 @@ class TestConceptCatalog:
 
     def test_equipment_count(self):
         counts = count_by_type(self.catalog)
-        assert counts.get("equipment", 0) == 32, (
-            f"Expected 32 equipment items, got {counts.get('equipment', 0)}"
+        # Phase 11 added 5 hybrid equipment items (sled, rower, assault_bike,
+        # rope, tire) to the original 32 base items → 37 total.
+        assert counts.get("equipment", 0) == 37, (
+            f"Expected 37 equipment items, got {counts.get('equipment', 0)}"
         )
 
     def test_knee_joint_exists(self):

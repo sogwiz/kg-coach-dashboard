@@ -414,6 +414,188 @@
         "wrist": ["load"],
         "lumbar_spine": ["flexion", "extension", "load"]
       }
+    },
+    "hyb-001": {
+      "name": "Sled Push",
+      "joint_movements": {
+        "knee": ["flexion", "extension", "load"],
+        "hip": ["flexion", "extension", "load"],
+        "ankle": ["extension", "load"]
+      }
+    },
+    "hyb-002": {
+      "name": "Sled Pull (Strap)",
+      "joint_movements": {
+        "hip": ["extension", "load"],
+        "knee": ["extension", "load"],
+        "shoulder": ["extension", "load"]
+      }
+    },
+    "hyb-003": {
+      "name": "Wall Ball Shot",
+      "joint_movements": {
+        "knee": ["flexion", "extension", "load"],
+        "hip": ["flexion", "extension", "load"],
+        "shoulder": ["flexion", "load"],
+        "elbow": ["extension", "load"]
+      }
+    },
+    "hyb-004": {
+      "name": "SkiErg Sprint",
+      "joint_movements": {
+        "shoulder": ["flexion", "extension", "load"],
+        "elbow": ["flexion", "extension"],
+        "hip": ["flexion", "extension"],
+        "lumbar_spine": ["flexion", "extension", "load"]
+      }
+    },
+    "hyb-005": {
+      "name": "Farmers Carry",
+      "joint_movements": {
+        "wrist": ["load"],
+        "shoulder": ["load"],
+        "knee": ["extension", "load"],
+        "ankle": ["load"]
+      }
+    },
+    "hyb-006": {
+      "name": "Sandbag Lunge (Alternating)",
+      "joint_movements": {
+        "knee": ["flexion", "load"],
+        "hip": ["flexion", "load"],
+        "ankle": ["flexion"],
+        "lumbar_spine": ["load"]
+      }
+    },
+    "hyb-007": {
+      "name": "Rowing Ergometer (Concept2)",
+      "joint_movements": {
+        "knee": ["flexion", "extension", "load"],
+        "hip": ["flexion", "extension", "load"],
+        "shoulder": ["flexion", "extension", "load"],
+        "elbow": ["flexion", "load"],
+        "lumbar_spine": ["flexion", "extension", "load"]
+      }
+    },
+    "hyb-008": {
+      "name": "Burpee Broad Jump",
+      "joint_movements": {
+        "knee": ["flexion", "extension", "load", "impact"],
+        "hip": ["flexion", "extension", "load"],
+        "shoulder": ["flexion", "load"],
+        "elbow": ["extension", "load"],
+        "ankle": ["flexion", "extension", "impact"],
+        "wrist": ["load"]
+      }
+    },
+    "hyb-009": {
+      "name": "Sandbag Clean and Press",
+      "joint_movements": {
+        "knee": ["flexion", "extension", "load"],
+        "hip": ["flexion", "extension", "load"],
+        "shoulder": ["flexion", "load"],
+        "elbow": ["extension", "load"],
+        "lumbar_spine": ["flexion", "extension", "load"]
+      }
+    },
+    "hyb-010": {
+      "name": "Run (Outdoor / Treadmill)",
+      "joint_movements": {
+        "knee": ["flexion", "extension", "load", "impact"],
+        "hip": ["flexion", "extension"],
+        "ankle": ["flexion", "extension", "impact"]
+      }
+    },
+    "hyb-011": {
+      "name": "Kettlebell Swing (Two-Hand)",
+      "joint_movements": {
+        "hip": ["flexion", "extension", "load"],
+        "lumbar_spine": ["extension", "load"],
+        "knee": ["flexion", "extension"],
+        "shoulder": ["flexion"]
+      }
+    },
+    "hyb-012": {
+      "name": "Box Jump",
+      "joint_movements": {
+        "knee": ["flexion", "extension", "load", "impact"],
+        "hip": ["flexion", "extension"],
+        "ankle": ["flexion", "extension", "impact"]
+      }
+    },
+    "hyb-013": {
+      "name": "Assault Bike (Max Effort)",
+      "joint_movements": {
+        "knee": ["flexion", "extension", "load"],
+        "hip": ["flexion", "extension"],
+        "shoulder": ["flexion", "extension"],
+        "elbow": ["flexion", "extension"],
+        "ankle": ["flexion", "extension"]
+      }
+    },
+    "hyb-014": {
+      "name": "Sandbag Over Shoulder",
+      "joint_movements": {
+        "hip": ["flexion", "extension", "load"],
+        "knee": ["flexion", "extension", "load"],
+        "shoulder": ["flexion", "rotation", "load"],
+        "lumbar_spine": ["flexion", "rotation", "load"]
+      }
+    },
+    "hyb-015": {
+      "name": "Bear Crawl",
+      "joint_movements": {
+        "shoulder": ["load"],
+        "wrist": ["load"],
+        "knee": ["flexion"],
+        "hip": ["flexion"]
+      }
+    },
+    "hyb-016": {
+      "name": "Dumbbell Suitcase Carry",
+      "joint_movements": {
+        "wrist": ["load"],
+        "shoulder": ["load"],
+        "lumbar_spine": ["load"],
+        "hip": ["load"],
+        "ankle": ["load"]
+      }
+    },
+    "hyb-017": {
+      "name": "Zone-2 Steady State Bike",
+      "joint_movements": {
+        "knee": ["flexion", "extension"],
+        "hip": ["flexion", "extension"],
+        "ankle": ["flexion", "extension"]
+      }
+    },
+    "hyb-018": {
+      "name": "Rope Climb",
+      "joint_movements": {
+        "shoulder": ["flexion", "extension", "load"],
+        "elbow": ["flexion", "load"],
+        "wrist": ["load"]
+      }
+    },
+    "hyb-019": {
+      "name": "Single-Arm Kettlebell Carry (Rack Position)",
+      "joint_movements": {
+        "shoulder": ["load"],
+        "wrist": ["load"],
+        "lumbar_spine": ["load"],
+        "hip": ["load"],
+        "ankle": ["load"]
+      }
+    },
+    "hyb-020": {
+      "name": "Tire Flip",
+      "joint_movements": {
+        "knee": ["flexion", "extension", "load"],
+        "hip": ["flexion", "extension", "load"],
+        "lumbar_spine": ["flexion", "extension", "load"],
+        "shoulder": ["flexion", "load"],
+        "elbow": ["extension", "load"]
+      }
     }
   }
 }

@@ -1,5 +1,7 @@
 """
 WorkoutPlan models — Phase 6 (updated with exercise sequencing fields).
+Phase 11: Extended with Block, Phase, and SessionPlan for advanced formats
+(HYROX, Zone-2, tactical circuits).
 
 Pydantic models for a structured workout plan returned by the generator
 pipeline.  The plan has three sections (warmup / main / cooldown), each
@@ -10,11 +12,21 @@ the exercise sits at its specific position in the order.
 Session-level fields (stimulus, target_adaptation, design_rationale,
 sequence_logic) let the Copilot explain WHY the plan was designed the way
 it was without having to re-examine raw exercise data.
+
+Phase 11 additions (additive — do NOT break Phase 6/9 WorkoutPlan):
+  - Block: a typed conditioning or strength block within a phase
+    (strength / interval / amrap / emom / circuit / steady_state)
+  - Phase: a named session phase with role, time budget, and ordered blocks
+    (role: mobility / primer / strength / metcon / accessory / cooldown /
+    station_brick)
+  - SessionPlan: advanced session container (phases + total_minutes)
+    used by HYROX-prep and Zone-2 templates; WorkoutPlan remains the
+    primary output for the existing 3-variant generator.
 """
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -131,3 +143,135 @@ class WorkoutPlan(BaseModel):
             "protect the lumbar spine)."
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# Phase 11 — Advanced format models (Block, Phase, SessionPlan)
+#
+# These are ADDITIVE to WorkoutPlan and do not affect the existing 3-variant
+# generator pipeline.  They are used by the template-driven generator path
+# (select_template / allocate_time in app/generator/templates.py).
+# ---------------------------------------------------------------------------
+
+
+BlockType = Literal["strength", "interval", "amrap", "emom", "circuit", "steady_state"]
+PhaseRole = Literal[
+    "mobility", "primer", "strength", "metcon", "accessory", "cooldown", "station_brick"
+]
+
+
+class Block(BaseModel):
+    """
+    A typed conditioning or strength block within a Phase.
+
+    type:
+        The format/modality of this block:
+          - "strength"     — traditional sets × reps with rest periods
+          - "interval"     — timed work:rest intervals (e.g. 40s on / 20s off)
+          - "amrap"        — as-many-rounds-as-possible in a fixed window
+          - "emom"         — every-minute-on-the-minute
+          - "circuit"      — sequential exercises with minimal rest
+          - "steady_state" — sustained aerobic effort (Zone-2, easy rowing)
+    duration_minutes:
+        Target block duration in minutes.
+    exercise_ids:
+        Ordered list of exercise ids included in this block.
+    work_seconds:
+        Work interval duration (used for interval / emom / circuit blocks).
+        None for strength or steady_state blocks.
+    rest_seconds:
+        Rest interval between exercises or rounds.
+        For steady_state this is typically 0.
+    rounds:
+        Number of rounds (used for amrap / emom / circuit).  None for
+        strength or steady_state blocks.
+    notes:
+        Free-text coaching notes for this block (e.g. "target HR 130-150 bpm").
+    extra:
+        Flexible dict for type-specific fields not covered above
+        (e.g. {"target_distance_m": 1000} for a rowing block).
+    """
+
+    type: BlockType
+    duration_minutes: float = Field(ge=0.0)
+    exercise_ids: list[str] = Field(default_factory=list)
+    work_seconds: int | None = Field(default=None, ge=1)
+    rest_seconds: int = Field(default=60, ge=0)
+    rounds: int | None = Field(default=None, ge=1)
+    notes: str = ""
+    extra: dict[str, Any] = Field(default_factory=dict)
+
+
+class Phase(BaseModel):
+    """
+    A named segment of a training session containing one or more Blocks.
+
+    role:
+        The functional role of this phase within the session arc:
+          - "mobility"       — dynamic warm-up, CARs, joint prep
+          - "primer"         — injury-protective activation before compounds
+          - "strength"       — primary strength/hypertrophy block
+          - "metcon"         — metabolic conditioning (AMRAP, intervals, etc.)
+          - "accessory"      — isolation or corrective work after compounds
+          - "cooldown"       — parasympathetic down-regulation, static stretching
+          - "station_brick"  — HYROX-style run + functional station pairing
+    target_adaptation:
+        One-line physiological adaptation targeted (e.g. "aerobic base",
+        "lower-body power", "thoracic mobility").
+    time_share:
+        Proportional share of total session time (0.0-1.0).
+        allocate_time() uses this to compute actual minute budgets.
+    min_duration:
+        Minimum viable duration in minutes.  If the scaled duration falls
+        below this, the phase is dropped when time is constrained
+        (unless priority == 1).
+    priority:
+        Drop order when time is constrained: lower value = drop first.
+        Priority 1 (highest) phases are never dropped.
+        Priority 5 (lowest) phases are dropped first.
+    blocks:
+        Ordered list of Block objects within this phase.
+    """
+
+    role: PhaseRole
+    target_adaptation: str = ""
+    time_share: float = Field(default=0.25, ge=0.0, le=1.0)
+    min_duration: int = Field(default=5, ge=1, description="Minimum duration in minutes")
+    priority: int = Field(default=3, ge=1, le=5, description="1=never drop, 5=drop first")
+    blocks: list[Block] = Field(default_factory=list)
+    # Computed at allocation time (not part of the template definition)
+    allocated_minutes: float = Field(default=0.0, ge=0.0)
+
+
+class SessionPlan(BaseModel):
+    """
+    Advanced session container used by the template-driven generator path.
+
+    Unlike WorkoutPlan (which has warmup/main/cooldown sections), SessionPlan
+    uses an ordered list of Phase objects — each with a role, time budget, and
+    typed Block sub-structure.  This supports:
+      - HYROX-prep sessions (station_brick + strength + metcon phases)
+      - Zone-2 sessions (single steady_state phase)
+      - Tactical circuits (primer + circuit + cooldown)
+
+    WorkoutPlan remains the primary output for the existing 3-variant generator
+    (Phases 6/9); SessionPlan is generated in parallel via templates.py and
+    may be attached to a WorkoutVariant as an optional field in the future.
+
+    Attributes
+    ----------
+    phases:
+        Ordered list of phases after time allocation.  Phases that were
+        dropped due to time constraints are excluded.
+    total_minutes:
+        The total session duration target used during allocation.
+    methodology:
+        The template/methodology key used (e.g. "hyrox_prep", "zone2").
+    prompt:
+        The original coach prompt that triggered this session.
+    """
+
+    phases: list[Phase] = Field(default_factory=list)
+    total_minutes: int = Field(ge=1)
+    methodology: str = ""
+    prompt: str = ""

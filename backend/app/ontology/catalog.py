@@ -5,7 +5,8 @@ Builds Concept nodes for all four primary families:
   - 19 muscles / muscle groups
   - 9 joints / spinal segments
   - 36 movement patterns
-  - 32 equipment items
+  - 37 equipment items (32 base + 5 Phase-11 hybrid: Sled, Rower, Assault Bike,
+    Rope, Tire)
 
 Each node carries:
   - id          : stable slug used as the graph node key
@@ -169,6 +170,12 @@ EQUIPMENT: list[Concept] = [
     _c("suspension_trainer", "equipment", "Suspension Trainer", ["TRX", "suspension system", "suspension straps"]),
     _c("wall", "equipment", "Wall", ["wall surface", "wall support"]),
     _c("yoga_mat", "equipment", "Yoga Mat", ["exercise mat", "gym mat", "training mat", "floor mat"]),
+    # Phase 11 — Hybrid / HYROX / tactical equipment
+    _c("sled", "equipment", "Sled", ["prowler", "push sled", "pull sled", "weight sled", "sled drag"]),
+    _c("rower", "equipment", "Rower", ["Concept2 rower", "rowing ergometer", "rowing machine", "erg", "C2 rower"]),
+    _c("assault_bike", "equipment", "Assault Bike", ["air bike", "fan bike", "airdyne", "Echo bike", "assault air bike"]),
+    _c("rope", "equipment", "Rope", ["climbing rope", "battle rope", "rope climb"]),
+    _c("tire", "equipment", "Tire", ["tyre", "flipping tire", "atlas tire"]),
 ]
 
 # ---------------------------------------------------------------------------
@@ -231,9 +238,11 @@ def build_concept_catalog() -> dict[str, Concept]:
     """
     Return the full concept catalog as a dict keyed by concept id.
 
-    Total expected count: 19 muscles + 9 joints + 36 patterns + 32 equipment
+    Total expected count: 19 muscles + 9 joints + 36 patterns + 37 equipment
+                          (32 base + 5 Phase-11 hybrid: sled, rower, assault_bike,
+                          rope, tire)
                           + 8 body_regions (5 knee + 3 lumbar)
-                          + 7 injuries (5 knee + 2 lumbar) = 111 nodes.
+                          + 7 injuries (5 knee + 2 lumbar) = 116 nodes.
     """
     all_concepts: list[Concept] = (
         MUSCLES + JOINTS + PATTERNS + EQUIPMENT + BODY_REGIONS + INJURIES

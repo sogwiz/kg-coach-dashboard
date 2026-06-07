@@ -26,6 +26,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 _DATA_DIR = _REPO_ROOT / "data"
 
 _EXERCISES_PATH = _DATA_DIR / "exercises.json"
+_HYBRID_EXERCISES_PATH = _DATA_DIR / "exercises.hybrid.json"  # Phase 11 hybrid catalog
 _MOVEMENTS_PATH = _DATA_DIR / "exercise_movements.json"
 _MEMBER_PATH = _DATA_DIR / "member-context.json"      # legacy single-member file
 _MEMBERS_DIR = _DATA_DIR / "members"                  # Phase 6 per-member directory
@@ -44,10 +45,18 @@ def load_exercises() -> list[Exercise]:
     Load the exercise catalog from data/exercises.json and merge in
     movement-type annotations from data/exercise_movements.json.
 
+    Also merges exercises.hybrid.json (Phase 11: HYROX/tactical movements)
+    when that file exists — hybrid exercises are appended to the base catalog.
+
     The joint_movements field is populated from the annotations file;
     exercises without an annotation entry get an empty dict (safe default).
     """
     raw = json.loads(_EXERCISES_PATH.read_text(encoding="utf-8"))
+
+    # Merge hybrid exercises if the file exists (Phase 11)
+    if _HYBRID_EXERCISES_PATH.exists():
+        hybrid_raw = json.loads(_HYBRID_EXERCISES_PATH.read_text(encoding="utf-8"))
+        raw = raw + hybrid_raw
 
     # Load movement annotations if the file exists
     joint_movements_by_id: dict[str, dict] = {}

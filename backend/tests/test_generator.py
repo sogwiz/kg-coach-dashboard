@@ -76,6 +76,12 @@ ALL_EQUIPMENT = {
     "Suspension Trainer",
     "Wall",
     "Yoga Mat",
+    # Phase 11 hybrid equipment
+    "Sled",
+    "Rower",
+    "Assault Bike",
+    "Rope",
+    "Tire",
 }
 
 

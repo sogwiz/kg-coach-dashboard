@@ -6,8 +6,16 @@ from app.data.loader import load_exercises, load_member_context
 
 
 def test_exercises_load_50_records():
+    # Phase 11: load_exercises() now merges exercises.hybrid.json (20 hybrid exercises)
+    # with exercises.json (50 base exercises) → 70 total.
     exercises = load_exercises()
-    assert len(exercises) == 50, f"Expected 50 exercises, got {len(exercises)}"
+    base_exercises = [ex for ex in exercises if not ex.id.startswith("hyb-")]
+    assert len(base_exercises) == 50, (
+        f"Expected 50 base exercises, got {len(base_exercises)}"
+    )
+    assert len(exercises) >= 50, (
+        f"Expected at least 50 exercises total, got {len(exercises)}"
+    )
 
 
 def test_exercises_have_required_fields():

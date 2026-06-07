@@ -45,7 +45,7 @@ HIGH_PLANK_BIRD_DOG_ID = "01f5a2bb-ecf7-4168-92b3-35bd78592e26"
 # Reference date: 2026-06-06 (27 days after Jordan's 2026-05-10 onset = REMODELING)
 REF_DATE = date(2026, 6, 6)
 
-# All equipment set (same as test_safety_filter.py)
+# All equipment set (same as test_safety_filter.py) — Phase 11: hybrid equipment added
 ALL_EQUIPMENT = {
     "Adjustable Bench - Decline",
     "Adjustable Bench - Incline",
@@ -79,6 +79,12 @@ ALL_EQUIPMENT = {
     "Suspension Trainer",
     "Wall",
     "Yoga Mat",
+    # Phase 11 hybrid equipment
+    "Sled",
+    "Rower",
+    "Assault Bike",
+    "Rope",
+    "Tire",
 }
 
 
