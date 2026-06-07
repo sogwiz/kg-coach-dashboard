@@ -277,6 +277,21 @@ async def generate_workout(
     # ------------------------------------------------------------------
     from app.generator.llm import structure_plan
 
+    # Build a plain-language injury context string for the LLM prompt
+    injury_context_str: str = "none"
+    if injury is not None:
+        phase_val = injury.computed_phase().value
+        state = injury.current_state()
+        if state is not None:
+            pain_str = ", ".join(state.pain_on) if state.pain_on else "none"
+            injury_context_str = (
+                f"{injury.diagnosis} at {injury.joint} "
+                f"({phase_val} phase, pain on: {pain_str}, "
+                f"load tolerance: {state.load_tolerance_pct:.0%})"
+            )
+        else:
+            injury_context_str = f"{injury.diagnosis} at {injury.joint} ({phase_val} phase)"
+
     async def _structure_variant(
         variant_id: str,
         label: str,
@@ -300,6 +315,7 @@ async def generate_workout(
                 time_minutes=input.time_window_minutes,
                 load_tolerance_pct=trace.load_tolerance_pct,
                 llm=llm,
+                injury_context=injury_context_str,
             ),
         )
 

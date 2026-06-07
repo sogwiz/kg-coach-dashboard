@@ -1013,3 +1013,618 @@ class TestGeneratorEndpoint:
         for v in data["variants"]:
             assert v["plan"]["stimulus"]
             assert v["plan"]["total_minutes"] > 0
+
+
+# ---------------------------------------------------------------------------
+# 9. Sequencing fields — schema + round-trip tests (no API key required)
+# ---------------------------------------------------------------------------
+
+
+class TestSequencingSchema:
+    """
+    Deterministic structural tests for the new sequencing fields on
+    PlannedExercise and WorkoutPlan.  No LLM or API key needed.
+    """
+
+    def test_planned_exercise_accepts_sequencing_fields(self):
+        """PlannedExercise round-trips all new sequencing fields."""
+        from app.models.plan import PlannedExercise
+
+        ex = PlannedExercise(
+            exercise_id="ex_001",
+            name="Banded Hip Thrust",
+            order=1,
+            sets=3,
+            reps=15,
+            rest_seconds=45,
+            rationale="Pre-activates glutes before the main squat block.",
+            sequencing_rationale=(
+                "Placed first in warmup: hip thrusts fire the glutes before any "
+                "knee-loading compound, protecting both the lumbar spine and the knee."
+            ),
+            sequencing_role="primer",
+        )
+
+        assert ex.order == 1
+        assert ex.sequencing_role == "primer"
+        assert "glutes" in ex.sequencing_rationale
+        assert "glutes" in ex.rationale
+
+    def test_planned_exercise_order_field_validates_ge1(self):
+        """order must be >= 1; zero or negative values raise ValidationError."""
+        from pydantic import ValidationError
+
+        from app.models.plan import PlannedExercise
+
+        with pytest.raises(ValidationError):
+            PlannedExercise(
+                exercise_id="ex_001",
+                name="Test",
+                order=0,  # invalid
+                sets=1,
+                reps=10,
+                rest_seconds=30,
+            )
+
+    def test_planned_exercise_sequencing_role_literals(self):
+        """sequencing_role only accepts the six defined literals."""
+        from pydantic import ValidationError
+
+        from app.models.plan import PlannedExercise
+
+        valid_roles = [
+            "activation", "primer", "compound",
+            "accessory", "conditioning", "cooldown",
+        ]
+        for role in valid_roles:
+            ex = PlannedExercise(
+                exercise_id="ex_001",
+                name="Test",
+                order=1,
+                sets=1,
+                reps=10,
+                rest_seconds=30,
+                sequencing_role=role,
+            )
+            assert ex.sequencing_role == role
+
+        with pytest.raises(ValidationError):
+            PlannedExercise(
+                exercise_id="ex_001",
+                name="Test",
+                order=1,
+                sets=1,
+                reps=10,
+                rest_seconds=30,
+                sequencing_role="invalid_role",
+            )
+
+    def test_workout_plan_accepts_sequence_logic(self):
+        """WorkoutPlan round-trips the new sequence_logic field."""
+        from app.models.plan import PlannedExercise, WorkoutPlan
+
+        plan = WorkoutPlan(
+            warmup=[
+                PlannedExercise(
+                    exercise_id="ex_w1",
+                    name="Hip 90/90 Stretch",
+                    order=1,
+                    sets=1,
+                    duration_seconds=60,
+                    rest_seconds=0,
+                    sequencing_role="activation",
+                    sequencing_rationale=(
+                        "Opens the session with hip mobility to prepare the joint "
+                        "before any loading."
+                    ),
+                    rationale="Targets hip internal rotation for mobility.",
+                ),
+                PlannedExercise(
+                    exercise_id="ex_w2",
+                    name="Banded Clamshell",
+                    order=2,
+                    sets=2,
+                    reps=15,
+                    rest_seconds=30,
+                    sequencing_role="primer",
+                    sequencing_rationale=(
+                        "Follows hip mobility to activate the hip abductors and "
+                        "protect the knee during subsequent loading."
+                    ),
+                    rationale="Pre-activates glute medius to stabilise the knee.",
+                ),
+            ],
+            main=[
+                PlannedExercise(
+                    exercise_id="ex_m1",
+                    name="Goblet Squat",
+                    order=1,
+                    sets=3,
+                    reps=10,
+                    rest_seconds=90,
+                    sequencing_role="compound",
+                    sequencing_rationale=(
+                        "First compound of the main block while the CNS is fresh; "
+                        "glutes pre-activated by the warmup primers."
+                    ),
+                    rationale="Primary lower-body strength stimulus.",
+                ),
+            ],
+            cooldown=[],
+            total_minutes=45,
+            stimulus="lower-body strength, knee-safe",
+            target_adaptation="quad and glute hypertrophy at 70% load tolerance",
+            design_rationale="Structured around Jordan's knee flexion restriction.",
+            sequence_logic=(
+                "The session opens with hip mobility and a glute primer (clamshell) "
+                "immediately before the goblet squat. This pre-activation sequence "
+                "ensures the glutes absorb load before the knee, reducing compressive "
+                "patellofemoral forces. The compound squat follows while the CNS is "
+                "fully primed, maximising mechanical tension for the main stimulus."
+            ),
+        )
+
+        assert plan.sequence_logic != ""
+        assert "glute" in plan.sequence_logic
+        assert len(plan.warmup) == 2
+        assert plan.warmup[0].order == 1
+        assert plan.warmup[1].order == 2
+        assert plan.main[0].order == 1
+
+    def test_workout_plan_model_dump_includes_sequencing_fields(self):
+        """model_dump() includes all new sequencing fields (serialisation contract)."""
+        from app.models.plan import PlannedExercise, WorkoutPlan
+
+        plan = WorkoutPlan(
+            warmup=[
+                PlannedExercise(
+                    exercise_id="ex_001",
+                    name="Test",
+                    order=1,
+                    sets=1,
+                    reps=10,
+                    rest_seconds=30,
+                    sequencing_role="activation",
+                    sequencing_rationale="First in warmup.",
+                    rationale="Selected for mobility.",
+                )
+            ],
+            main=[],
+            cooldown=[],
+            total_minutes=30,
+            stimulus="test",
+            target_adaptation="test",
+            design_rationale="test",
+            sequence_logic="Overall ordering logic here.",
+        )
+
+        d = plan.model_dump()
+
+        # Session-level field present
+        assert "sequence_logic" in d
+        assert d["sequence_logic"] == "Overall ordering logic here."
+
+        # Per-exercise sequencing fields present
+        ex_dict = d["warmup"][0]
+        assert "order" in ex_dict
+        assert ex_dict["order"] == 1
+        assert "sequencing_role" in ex_dict
+        assert ex_dict["sequencing_role"] == "activation"
+        assert "sequencing_rationale" in ex_dict
+        assert ex_dict["sequencing_rationale"] == "First in warmup."
+
+    def test_planned_exercise_default_order_is_1(self):
+        """order defaults to 1 for backward compatibility with existing tests."""
+        from app.models.plan import PlannedExercise
+
+        ex = PlannedExercise(
+            exercise_id="ex_001",
+            name="Test",
+            sets=1,
+            reps=10,
+            rest_seconds=30,
+        )
+        assert ex.order == 1
+
+    def test_planned_exercise_default_sequencing_role_is_compound(self):
+        """sequencing_role defaults to 'compound' for backward compatibility."""
+        from app.models.plan import PlannedExercise
+
+        ex = PlannedExercise(
+            exercise_id="ex_001",
+            name="Test",
+            sets=1,
+            reps=10,
+            rest_seconds=30,
+        )
+        assert ex.sequencing_role == "compound"
+
+    def test_workout_plan_default_sequence_logic_is_empty_string(self):
+        """sequence_logic defaults to empty string for backward compatibility."""
+        from app.models.plan import WorkoutPlan
+
+        plan = WorkoutPlan(
+            warmup=[],
+            main=[],
+            cooldown=[],
+            total_minutes=30,
+        )
+        assert plan.sequence_logic == ""
+
+
+# ---------------------------------------------------------------------------
+# 10. Mock-LLM sequencing output test (no API key required)
+# ---------------------------------------------------------------------------
+
+
+class TestMockLLMSequencingOutput:
+    """
+    Verify that when the LLM (mocked) returns a plan with sequencing fields,
+    those fields are preserved correctly through the generate_workout pipeline.
+    """
+
+    @pytest.mark.asyncio
+    async def test_generate_workout_preserves_sequencing_fields(self, kg):
+        """
+        When the mock LLM returns a WorkoutPlan with order / sequencing_role /
+        sequencing_rationale / sequence_logic, those fields survive the full
+        generate_workout pipeline unchanged.
+        """
+        from app.generator.pipeline import GeneratorInput, generate_workout
+        from app.models.plan import PlannedExercise, WorkoutPlan
+
+        sequenced_plan = WorkoutPlan(
+            warmup=[
+                PlannedExercise(
+                    exercise_id="ex_w1",
+                    name="Hip Activation",
+                    order=1,
+                    sets=2,
+                    reps=15,
+                    rest_seconds=30,
+                    rationale="Pre-activates glutes.",
+                    sequencing_rationale=(
+                        "First in warmup to prime posterior chain before loading."
+                    ),
+                    sequencing_role="primer",
+                ),
+            ],
+            main=[
+                PlannedExercise(
+                    exercise_id="ex_m1",
+                    name="Goblet Squat",
+                    order=1,
+                    sets=4,
+                    reps=8,
+                    rest_seconds=90,
+                    rationale="Primary compound for lower-body strength.",
+                    sequencing_rationale=(
+                        "Placed first in main while CNS is fresh, after glute primer."
+                    ),
+                    sequencing_role="compound",
+                ),
+                PlannedExercise(
+                    exercise_id="ex_m2",
+                    name="Romanian Deadlift",
+                    order=2,
+                    sets=3,
+                    reps=10,
+                    rest_seconds=75,
+                    rationale="Accessory for hamstring and hip hinge development.",
+                    sequencing_rationale=(
+                        "Follows the squat to address the posterior chain while "
+                        "already warm, but after the more CNS-demanding compound."
+                    ),
+                    sequencing_role="accessory",
+                ),
+            ],
+            cooldown=[
+                PlannedExercise(
+                    exercise_id="ex_c1",
+                    name="Standing Quad Stretch",
+                    order=1,
+                    sets=1,
+                    duration_seconds=60,
+                    rest_seconds=0,
+                    rationale="Releases quad tension post-squat.",
+                    sequencing_rationale=(
+                        "Last in session for parasympathetic recovery."
+                    ),
+                    sequencing_role="cooldown",
+                ),
+            ],
+            total_minutes=45,
+            stimulus="lower-body strength, knee-safe",
+            target_adaptation="quad and glute hypertrophy",
+            design_rationale="Built around Jordan's knee flexion restriction.",
+            sequence_logic=(
+                "Session opens with a glute primer to protect the patellofemoral "
+                "joint before knee loading. Goblet squat follows as the primary "
+                "compound while the CNS is fresh. Accessories trail to manage "
+                "fatigue, cooldown closes with static work."
+            ),
+        )
+
+        mock_llm = MagicMock()
+        structured_mock = MagicMock()
+        structured_mock.invoke.return_value = sequenced_plan
+        mock_llm.with_structured_output.return_value = structured_mock
+
+        member = load_member_context()
+        gen_input = GeneratorInput(
+            prompt="lower body strength",
+            time_window_minutes=45,
+            member_id=member.profile.id,
+        )
+
+        output = await generate_workout(
+            input=gen_input,
+            kg=kg,
+            member=member,
+            llm=mock_llm,
+        )
+
+        assert len(output.variants) == 3
+
+        for variant in output.variants:
+            plan = variant.plan
+
+            # sequence_logic is present and non-empty
+            assert plan.sequence_logic, (
+                f"Variant '{variant.variant_id}': sequence_logic must be non-empty"
+            )
+
+            # All exercises in warmup have order, sequencing_role, sequencing_rationale
+            for ex in plan.warmup:
+                assert ex.order >= 1, (
+                    f"Variant '{variant.variant_id}': warmup exercise '{ex.name}' "
+                    f"order={ex.order} must be >= 1"
+                )
+                assert ex.sequencing_role in {
+                    "activation", "primer", "compound",
+                    "accessory", "conditioning", "cooldown"
+                }, (
+                    f"Variant '{variant.variant_id}': warmup exercise '{ex.name}' "
+                    f"has invalid sequencing_role='{ex.sequencing_role}'"
+                )
+
+            # All exercises in main have order, sequencing_role, sequencing_rationale
+            for ex in plan.main:
+                assert ex.order >= 1
+                assert ex.sequencing_role in {
+                    "activation", "primer", "compound",
+                    "accessory", "conditioning", "cooldown"
+                }
+
+            # Warmup order is consecutive starting at 1
+            if plan.warmup:
+                orders = [ex.order for ex in plan.warmup]
+                assert sorted(orders) == list(range(1, len(plan.warmup) + 1)), (
+                    f"Variant '{variant.variant_id}': warmup order values "
+                    f"{orders} are not consecutive from 1"
+                )
+
+            # Main order is consecutive starting at 1
+            if plan.main:
+                orders = [ex.order for ex in plan.main]
+                assert sorted(orders) == list(range(1, len(plan.main) + 1)), (
+                    f"Variant '{variant.variant_id}': main order values "
+                    f"{orders} are not consecutive from 1"
+                )
+
+    @pytest.mark.asyncio
+    async def test_sequencing_fields_in_serialised_api_response(self, kg):
+        """
+        After generate_workout with a mock LLM, serialising with
+        _serialise_output produces dicts that include the new sequencing fields.
+        """
+        from app.api.routes.generator import _serialise_output
+        from app.generator.pipeline import GeneratorInput, generate_workout
+        from app.models.plan import PlannedExercise, WorkoutPlan
+
+        sequenced_plan = WorkoutPlan(
+            warmup=[
+                PlannedExercise(
+                    exercise_id="ex_w1",
+                    name="Glute Bridge",
+                    order=1,
+                    sets=2,
+                    reps=20,
+                    rest_seconds=30,
+                    rationale="Activates glutes.",
+                    sequencing_rationale="Primer before squats to protect lumbar spine.",
+                    sequencing_role="primer",
+                ),
+            ],
+            main=[
+                PlannedExercise(
+                    exercise_id="ex_m1",
+                    name="Bulgarian Split Squat",
+                    order=1,
+                    sets=3,
+                    reps=10,
+                    rest_seconds=90,
+                    rationale="Unilateral lower-body strength without lumbar load.",
+                    sequencing_rationale="First compound; glutes are primed from warmup.",
+                    sequencing_role="compound",
+                ),
+            ],
+            cooldown=[],
+            total_minutes=40,
+            stimulus="lower-body unilateral strength",
+            target_adaptation="glute and quad hypertrophy, knee-safe",
+            design_rationale="Jordan's knee restriction guides the compound selection.",
+            sequence_logic=(
+                "Glute bridge primer opens to pre-activate posterior chain. "
+                "Bulgarian split squat follows as the primary unilateral compound "
+                "with reduced knee-flexion range to respect Jordan's pain threshold."
+            ),
+        )
+
+        mock_llm = MagicMock()
+        structured_mock = MagicMock()
+        structured_mock.invoke.return_value = sequenced_plan
+        mock_llm.with_structured_output.return_value = structured_mock
+
+        member = load_member_context()
+        gen_input = GeneratorInput(
+            prompt="lower body",
+            time_window_minutes=40,
+            member_id=member.profile.id,
+        )
+
+        output = await generate_workout(
+            input=gen_input,
+            kg=kg,
+            member=member,
+            llm=mock_llm,
+        )
+
+        serialised = _serialise_output(output)
+
+        # Top-level structure
+        assert "variants" in serialised
+        assert len(serialised["variants"]) == 3
+
+        for v_dict in serialised["variants"]:
+            plan_dict = v_dict["plan"]
+
+            # Session-level field
+            assert "sequence_logic" in plan_dict, (
+                f"Variant '{v_dict['variant_id']}': sequence_logic missing from "
+                "serialised plan"
+            )
+
+            # Per-exercise sequencing fields in warmup
+            for ex_dict in plan_dict["warmup"]:
+                assert "order" in ex_dict, "order missing from warmup exercise"
+                assert "sequencing_role" in ex_dict, (
+                    "sequencing_role missing from warmup exercise"
+                )
+                assert "sequencing_rationale" in ex_dict, (
+                    "sequencing_rationale missing from warmup exercise"
+                )
+
+            # Per-exercise sequencing fields in main
+            for ex_dict in plan_dict["main"]:
+                assert "order" in ex_dict, "order missing from main exercise"
+                assert "sequencing_role" in ex_dict
+                assert "sequencing_rationale" in ex_dict
+
+
+# ---------------------------------------------------------------------------
+# 11. LLM-live sequencing tests — skipped without API key
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not HAS_API_KEY, reason="ANTHROPIC_API_KEY not set")
+class TestLLMSequencing:
+    """
+    Tests that call the live LLM to verify sequencing fields are populated.
+    Skipped without ANTHROPIC_API_KEY.
+    """
+
+    def test_structure_plan_populates_sequencing_fields(
+        self, all_exercises, kg, jordan_injury
+    ):
+        """
+        structure_plan returns a WorkoutPlan where every PlannedExercise has
+        order >= 1, a valid sequencing_role, and a non-empty sequencing_rationale.
+        The WorkoutPlan also has a non-empty sequence_logic.
+        """
+        from app.generator.llm import get_structuring_llm, structure_plan
+
+        trace = conditional_safety_filter(
+            candidates=all_exercises[:20],
+            injury=jordan_injury,
+            available_equipment=ALL_EQUIPMENT,
+            excluded_ids=set(),
+            dislikes=set(),
+            kg=kg,
+            reference_date=REF_DATE,
+        )
+
+        llm = get_structuring_llm()
+        plan = structure_plan(
+            safe_exercises=trace.safe[:10],
+            intent="lower body strength",
+            time_minutes=45,
+            load_tolerance_pct=0.7,
+            llm=llm,
+            injury_context=(
+                "left knee PFPS (remodeling phase, pain on flexion, "
+                "load tolerance 70%)"
+            ),
+        )
+
+        # Session-level
+        assert plan.sequence_logic, "sequence_logic must be non-empty"
+
+        all_sections = plan.warmup + plan.main + plan.cooldown
+        assert len(all_sections) > 0, "Plan must have at least one exercise"
+
+        valid_roles = {
+            "activation", "primer", "compound",
+            "accessory", "conditioning", "cooldown",
+        }
+
+        for section_name, section in [
+            ("warmup", plan.warmup),
+            ("main", plan.main),
+            ("cooldown", plan.cooldown),
+        ]:
+            for ex in section:
+                assert ex.order >= 1, (
+                    f"{section_name} exercise '{ex.name}' has order={ex.order}"
+                )
+                assert ex.sequencing_role in valid_roles, (
+                    f"{section_name} exercise '{ex.name}' has invalid "
+                    f"sequencing_role='{ex.sequencing_role}'"
+                )
+                assert ex.sequencing_rationale, (
+                    f"{section_name} exercise '{ex.name}' has empty "
+                    "sequencing_rationale"
+                )
+
+    def test_sequence_order_values_are_consecutive_per_section(
+        self, all_exercises, kg, jordan_injury
+    ):
+        """
+        order values within each section should be consecutive starting at 1.
+        This confirms the LLM follows the prompt's ordering instructions.
+        """
+        from app.generator.llm import get_structuring_llm, structure_plan
+
+        trace = conditional_safety_filter(
+            candidates=all_exercises[:20],
+            injury=jordan_injury,
+            available_equipment=ALL_EQUIPMENT,
+            excluded_ids=set(),
+            dislikes=set(),
+            kg=kg,
+            reference_date=REF_DATE,
+        )
+
+        llm = get_structuring_llm()
+        plan = structure_plan(
+            safe_exercises=trace.safe[:10],
+            intent="full body",
+            time_minutes=45,
+            load_tolerance_pct=0.7,
+            llm=llm,
+            injury_context="left knee PFPS (remodeling phase)",
+        )
+
+        for section_name, section in [
+            ("warmup", plan.warmup),
+            ("main", plan.main),
+            ("cooldown", plan.cooldown),
+        ]:
+            if not section:
+                continue
+            orders = sorted(ex.order for ex in section)
+            expected = list(range(1, len(section) + 1))
+            assert orders == expected, (
+                f"{section_name}: order values {orders} are not consecutive "
+                f"from 1 (expected {expected})"
+            )
