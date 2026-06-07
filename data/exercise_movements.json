@@ -376,6 +376,44 @@
         "knee": ["flexion"],
         "ankle": ["flexion"]
       }
+    },
+    "0732c6eb-2275-4af3-8276-9bb8be2aa12d": {
+      "name": "One-Kettlebell Hamstring Walkout",
+      "joint_movements": {
+        "knee": ["extension"],
+        "hip": ["flexion", "extension", "load"],
+        "ankle": ["flexion"],
+        "lumbar_spine": ["flexion", "load"]
+      }
+    },
+    "2248e07a-93de-4da1-ad20-aff27537a99a": {
+      "name": "Med Ball Hamstring Walkout",
+      "joint_movements": {
+        "knee": ["extension"],
+        "hip": ["flexion", "extension", "load"],
+        "ankle": ["flexion"],
+        "lumbar_spine": ["flexion", "load"]
+      }
+    },
+    "0333b0cc-4b43-45d9-adff-505b349e53d9": {
+      "name": "Sandbag Zercher Carry",
+      "joint_movements": {
+        "knee": ["flexion", "extension", "load"],
+        "hip": ["extension", "load"],
+        "shoulder": ["load"],
+        "ankle": ["load"],
+        "lumbar_spine": ["load"]
+      }
+    },
+    "201032fe-3189-4c79-a69b-e67e2c7e9b81": {
+      "name": "SkiErg",
+      "joint_movements": {
+        "elbow": ["flexion", "extension"],
+        "shoulder": ["flexion", "extension"],
+        "hip": ["flexion", "extension"],
+        "wrist": ["load"],
+        "lumbar_spine": ["flexion", "extension", "load"]
+      }
     }
   }
 }

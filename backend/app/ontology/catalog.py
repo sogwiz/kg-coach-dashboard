@@ -176,11 +176,19 @@ EQUIPMENT: list[Concept] = [
 # ---------------------------------------------------------------------------
 
 BODY_REGIONS: list[Concept] = [
+    # Knee anatomy (Phase 2)
     _c("knee_region", "body_region", "Knee Region", ["knee area", "knee complex", "patellofemoral region"], "72696002"),
     _c("patellofemoral_joint", "body_region", "Patellofemoral Joint", ["kneecap joint", "PF joint", "patella joint"], "57714003"),
     _c("tibiofemoral_joint", "body_region", "Tibiofemoral Joint", ["knee articulation", "TF joint"], "182204001"),
     _c("medial_meniscus", "body_region", "Medial Meniscus", ["inner meniscus", "medial cartilage"], "59440001"),
     _c("lateral_meniscus", "body_region", "Lateral Meniscus", ["outer meniscus", "lateral cartilage"], "64927001"),
+    # Lumbar spine anatomy (Phase 6)
+    _c("lumbar_spine_region", "body_region", "Lumbar Spine Region",
+       ["lumbar region", "low back region", "lower back region", "L-spine region"], "122496007"),
+    _c("lumbar_intervertebral_joint", "body_region", "Lumbar Intervertebral Joint",
+       ["lumbar facet joint", "lumbar joint", "L-spine joint"], "297179000"),
+    _c("lumbar_disc", "body_region", "Lumbar Intervertebral Disc",
+       ["lumbar disc", "L-spine disc", "lower back disc"], "244944005"),
 ]
 
 # ---------------------------------------------------------------------------
@@ -188,6 +196,7 @@ BODY_REGIONS: list[Concept] = [
 # ---------------------------------------------------------------------------
 
 INJURIES: list[Concept] = [
+    # Knee injuries (Phase 2)
     _c("pfps", "injury", "Patellofemoral Pain Syndrome",
        ["PFPS", "runner's knee", "chondromalacia", "anterior knee pain", "patellofemoral syndrome"],
        "57773001"),
@@ -203,6 +212,13 @@ INJURIES: list[Concept] = [
     _c("it_band_syndrome", "injury", "IT Band Syndrome",
        ["ITBS", "iliotibial band syndrome", "runner's knee lateral", "IT band friction"],
        "43208000"),
+    # Lumbar spine injuries (Phase 6)
+    _c("low_back_pain", "injury", "Low Back Pain",
+       ["LBP", "lumbago", "lumbar pain", "mechanical low back pain", "back pain", "lower back pain"],
+       "279039007"),
+    _c("lumbar_spondylosis", "injury", "Lumbar Spondylosis",
+       ["lumbar osteoarthritis", "lumbar DDD", "lumbar degenerative disc disease"],
+       "202794003"),
 ]
 
 
@@ -216,7 +232,8 @@ def build_concept_catalog() -> dict[str, Concept]:
     Return the full concept catalog as a dict keyed by concept id.
 
     Total expected count: 19 muscles + 9 joints + 36 patterns + 32 equipment
-                          + 5 body_regions + 5 injuries = 106 nodes.
+                          + 8 body_regions (5 knee + 3 lumbar)
+                          + 7 injuries (5 knee + 2 lumbar) = 111 nodes.
     """
     all_concepts: list[Concept] = (
         MUSCLES + JOINTS + PATTERNS + EQUIPMENT + BODY_REGIONS + INJURIES

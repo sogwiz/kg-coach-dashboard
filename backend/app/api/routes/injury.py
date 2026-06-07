@@ -54,8 +54,9 @@ def _load_injury(member_id: str, injury_id: str) -> Injury:
     """
     from app.data.loader import load_member_context
 
-    member = load_member_context()
-    if member.profile.id != member_id:
+    try:
+        member = load_member_context(member_id)
+    except ValueError:
         raise HTTPException(status_code=404, detail=f"Member '{member_id}' not found")
 
     # Find the injury in the member context

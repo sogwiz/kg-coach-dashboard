@@ -1,0 +1,158 @@
+{
+  "_note": "Synthetic, fictional sample member for the take-home. No real person or PHI. Use only as seed data.",
+  "member_id": "mbr_MICO",
+  "profile": {
+    "id": "mbr_MICO",
+    "name": "Mico",
+    "age": 35,
+    "sex": "male",
+    "height_cm": 178,
+    "weight_kg": 83.0,
+    "timezone": "America/New_York",
+    "member_since": "2025-01-10",
+    "coach_id": "coach_01HXSAM",
+    "tier": "1:1 Coaching"
+  },
+  "goals": [
+    { "id": "goal_hormones", "text": "Optimize testosterone and cortisol levels through training stimulus", "priority": 1, "target_date": "2026-12-31" },
+    { "id": "goal_longevity", "text": "Build a sustainable training base for long-term health and longevity", "priority": 1, "target_date": null },
+    { "id": "goal_hyrox", "text": "Complete HYROX race in under 70 minutes", "priority": 2, "target_date": "2027-03-01" },
+    { "id": "goal_back", "text": "Resolve desk-induced lumbar pain and restore full hip/T-spine mobility", "priority": 1, "target_date": "2026-09-01" }
+  ],
+  "preferences": {
+    "preferred_session_minutes": 60,
+    "training_days_per_week": 5,
+    "preferred_days": ["Mon", "Tue", "Wed", "Fri", "Sat"],
+    "dislikes": ["Burpees", "Leg Press Machine"],
+    "notes": "Former gymnast, loves calisthenics and gymnastics-derived movements. Full gym access including rig and rings. Prefers compound movements and functional patterns. Desk-bound founder — morning sessions only."
+  },
+  "equipment_available": [
+    "Barbell",
+    "Dumbbell",
+    "Kettlebell",
+    "Pull-Up Bar",
+    "Rack",
+    "Flat Bench",
+    "Adjustable Bench - Incline",
+    "Suspension Trainer",
+    "Resistance Band - Loop",
+    "Resistance Band - With Handles",
+    "Yoga Mat",
+    "Box",
+    "Plate",
+    "Medicine Ball",
+    "Sandbag",
+    "SkiErg",
+    "Jump Rope",
+    "Stability Ball",
+    "Lacrosse Ball"
+  ],
+  "injuries": [
+    {
+      "id": "inj_lumbar_spine",
+      "region": "lumbar spine",
+      "joint": "lumbar_spine",
+      "status": "managing",
+      "severity": "mild",
+      "since": "2025-11-01",
+      "onset_date": "2025-11-01",
+      "diagnosis": "Mechanical low-back pain — desk-induced. Reduced hip flexor length and T-spine mobility contributing to lumbar overload under flexion and compressive load. No disc pathology on imaging.",
+      "notes": "Onset correlated with extended remote work periods (10+ hrs/day seated). Pain on lumbar flexion under load and sustained compressive loading (heavy deadlifts, good mornings). Responds well to extension-biased work and hip mobility drills.",
+      "snomed_code": "279039007",
+      "states": [
+        {
+          "injury_id": "inj_lumbar_spine",
+          "recorded_at": "2026-06-01T07:00:00Z",
+          "inflammation": "mild",
+          "pain_on": ["flexion", "load"],
+          "subjective_pain": 4,
+          "load_tolerance_pct": 0.5,
+          "notes": "Post-long-flight stiffness. Lumbar tight and painful on forward bend under any load."
+        },
+        {
+          "injury_id": "inj_lumbar_spine",
+          "recorded_at": "2026-06-06T07:30:00Z",
+          "inflammation": "mild",
+          "pain_on": ["flexion", "load"],
+          "subjective_pain": 3,
+          "load_tolerance_pct": 0.6,
+          "notes": "Better after mobility work yesterday. Still painful on loaded flexion — avoiding deadlifts and good mornings."
+        }
+      ]
+    }
+  ],
+  "workout_history": [
+    { "date": "2026-06-05", "title": "Upper + Calisthenics", "planned": true, "completed": true, "duration_min": 58, "rpe": 7, "exercises": ["Pull-Up", "Ring Dip", "Handstand Hold", "DB Row"] },
+    { "date": "2026-06-04", "title": "Mobility + Hip Opener", "planned": true, "completed": true, "duration_min": 35, "rpe": 4, "exercises": ["90/90 Hip Stretch", "Pigeon Pose", "Cat-Cow", "Thoracic Rotation"] },
+    { "date": "2026-06-03", "title": "Conditioning - SkiErg + Carries", "planned": true, "completed": true, "duration_min": 45, "rpe": 8, "exercises": ["SkiErg", "Sandbag Carry", "Box Step-Up"] },
+    { "date": "2026-06-02", "title": "Upper Push + Core", "planned": true, "completed": true, "duration_min": 52, "rpe": 7, "exercises": ["Ring Push-Up", "DB Shoulder Press", "Pallof Press", "Dead Bug"] },
+    { "date": "2026-05-31", "title": "Lower Body - Hip Hinge Focus", "planned": true, "completed": true, "duration_min": 55, "rpe": 6, "exercises": ["KB Single-Leg RDL", "Hip Thrust", "Glute Bridge", "Copenhagen Plank"] }
+  ],
+  "adherence": {
+    "weekly_completion_pct": [
+      { "week_of": "2026-05-12", "pct": 100 },
+      { "week_of": "2026-05-19", "pct": 100 },
+      { "week_of": "2026-05-26", "pct": 100 },
+      { "week_of": "2026-06-02", "pct": 100 }
+    ],
+    "trend": "stable"
+  },
+  "biomarkers": {
+    "resting_hr_bpm": 52,
+    "hrv_ms": 68,
+    "sleep_hours_last_7_days": [7.2, 7.5, 6.8, 7.0, 7.4, 8.1, 7.3],
+    "weight_trend_kg": [
+      { "date": "2026-05-05", "kg": 83.5 },
+      { "date": "2026-05-19", "kg": 83.2 },
+      { "date": "2026-06-02", "kg": 83.0 }
+    ]
+  },
+  "labs": {
+    "blood_panel": {
+      "date": "2026-05-15",
+      "ldl_mg_dl": 105,
+      "hdl_mg_dl": 58,
+      "triglycerides_mg_dl": 88,
+      "hba1c_pct": 5.1,
+      "vitamin_d_ng_ml": 42,
+      "ferritin_ng_ml": 88,
+      "crp_mg_l": 0.8,
+      "testosterone_ng_dl": 520,
+      "free_testosterone_pg_ml": 12.4,
+      "cortisol_morning_mcg_dl": 18.2,
+      "shbg_nmol_l": 35,
+      "dhea_s_mcg_dl": 280,
+      "igf1_ng_ml": 195
+    },
+    "dexa_scan": {
+      "date": "2026-04-10",
+      "body_fat_pct": 14.2,
+      "lean_mass_kg": 68.3,
+      "fat_mass_kg": 11.8,
+      "bone_density_z_score": 1.1,
+      "visceral_fat_cm2": 52
+    }
+  },
+  "chat_history": [
+    { "ts": "2026-06-05T08:15:00-04:00", "from": "member", "text": "Crushed the calisthenics session. Rings felt great. Back held up well on the rows." },
+    { "ts": "2026-06-05T09:00:00-04:00", "from": "coach", "text": "Excellent. Your ring strength is at an elite level. Let's keep the lumbar load conservative this week and prioritize hip mobility before we reintroduce barbell hip hinges." },
+    { "ts": "2026-06-03T07:45:00-04:00", "from": "member", "text": "Good session today. SkiErg intervals are brutal but I can feel my conditioning improving. Back was a 3/10 during carries — manageable." },
+    { "ts": "2026-06-01T09:30:00-04:00", "from": "member", "text": "Just got back from SF. 5-hour flight left my back stiff as a board. Pain is a 4 today. Going to do the mobility protocol." }
+  ],
+  "coach_brief": {
+    "generated_for": "2026-06-06",
+    "morning_tasks": [
+      { "type": "check_in", "text": "Confirm Mico's lumbar status today — last check-in was 3/10 pain with mild inflammation. Avoid loaded lumbar flexion in today's session." },
+      { "type": "program_note", "text": "Today is a good day for upper-body calisthenics or conditioning. Hip hinge reintroduction (barbell RDL) can begin next week if lumbar pain drops below 2/10." },
+      { "type": "celebrate", "text": "Mico hit 100% adherence for 4 consecutive weeks — acknowledge the consistency." }
+    ],
+    "churn_risk": {
+      "level": "low",
+      "reasons": [
+        "100% session adherence for 4 consecutive weeks",
+        "High engagement in chat — daily check-ins",
+        "Strong progress on calisthenics goals (ring strength, handstand)"
+      ]
+    }
+  }
+}

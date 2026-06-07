@@ -233,3 +233,142 @@ class TestPartOfTraversal:
         assert len(pf_descendants) == 0, (
             f"Expected 0 descendants for PF joint, got: {pf_descendants}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Lumbar spine subtree tests (Phase 6)
+# ---------------------------------------------------------------------------
+
+
+class TestLumbarAnatomy:
+    def setup_method(self):
+        self.snomed = load_snomed_anatomy()
+
+    def test_lumbar_spine_concept_exists(self):
+        """SNOMED 122496007 = Lumbar spine structure."""
+        assert "122496007" in self.snomed, (
+            "Lumbar spine concept (122496007) not found in SNOMED index"
+        )
+        lumbar = self.snomed["122496007"]
+        assert lumbar.type == "body_region"
+
+    def test_lumbar_intervertebral_joint_exists(self):
+        """SNOMED 297179000 = Lumbar intervertebral joint."""
+        assert "297179000" in self.snomed, (
+            "Lumbar intervertebral joint (297179000) not found in SNOMED index"
+        )
+        joint = self.snomed["297179000"]
+        assert joint.type == "joint"
+
+    def test_lumbar_intervertebral_joint_part_of_lumbar_spine(self):
+        """Lumbar intervertebral joint (297179000) must be part-of lumbar spine (122496007)."""
+        joint = self.snomed["297179000"]
+        assert "122496007" in joint.part_of, (
+            f"Expected lumbar joint part_of to include lumbar spine '122496007', "
+            f"got: {joint.part_of}"
+        )
+
+    def test_lumbar_injury_concept_loaded(self):
+        """Low back pain concept (279039007) should be indexed."""
+        assert "279039007" in self.snomed, (
+            "Low back pain (279039007) not found in SNOMED index"
+        )
+        lbp = self.snomed["279039007"]
+        assert lbp.type == "injury"
+
+    def test_lumbar_disc_part_of_lumbar_spine(self):
+        """Lumbar intervertebral disc (244944005) must be part-of lumbar spine."""
+        assert "244944005" in self.snomed
+        disc = self.snomed["244944005"]
+        assert "122496007" in disc.part_of
+
+    def test_erector_spinae_part_of_lumbar_spine(self):
+        """Erector spinae (46467000) must be part-of lumbar spine."""
+        assert "46467000" in self.snomed
+        erector = self.snomed["46467000"]
+        assert "122496007" in erector.part_of
+
+
+class TestLumbarPartOfTraversal:
+    def setup_method(self):
+        self.snomed = load_snomed_anatomy()
+
+    def test_lumbar_spine_descendants_non_empty(self):
+        """descendants_by_part_of('lumbar_spine') code returns non-empty set."""
+        descendants = get_descendants_by_part_of(self.snomed, "122496007")
+        assert len(descendants) > 0, (
+            "Expected non-empty descendants for lumbar spine (122496007)"
+        )
+
+    def test_lumbar_spine_descendants_include_intervertebral_joint(self):
+        """Lumbar intervertebral joint must appear as descendant of lumbar spine."""
+        descendants = get_descendants_by_part_of(self.snomed, "122496007")
+        assert "297179000" in descendants, (
+            f"Expected lumbar intervertebral joint (297179000) in lumbar descendants. "
+            f"Got: {descendants}"
+        )
+
+    def test_lumbar_spine_descendants_include_erector_spinae(self):
+        """Erector spinae must appear as descendant of lumbar spine."""
+        descendants = get_descendants_by_part_of(self.snomed, "122496007")
+        assert "46467000" in descendants, (
+            f"Expected erector spinae (46467000) in lumbar descendants. "
+            f"Got: {descendants}"
+        )
+
+    def test_lumbar_spine_has_multiple_descendants(self):
+        """The lumbar spine should have at least 3 descendants."""
+        descendants = get_descendants_by_part_of(self.snomed, "122496007")
+        assert len(descendants) >= 3, (
+            f"Expected >= 3 descendants of lumbar spine, got {len(descendants)}: {descendants}"
+        )
+
+    def test_kg_lumbar_spine_descendants_via_catalog(self):
+        """
+        MovementKG.descendants_by_part_of('lumbar_spine') returns non-empty set,
+        meaning exercises stressing lumbar_spine can be correctly filtered.
+        """
+        from app.data.loader import load_exercises
+        from app.graph.movement_kg import MovementKG
+        from app.ontology.catalog import build_concept_catalog
+
+        exercises = load_exercises()
+        concepts = build_concept_catalog()
+        kg = MovementKG(exercises, concepts, self.snomed)
+
+        lumbar_descendants = kg.descendants_by_part_of("lumbar_spine")
+        assert len(lumbar_descendants) > 0, (
+            "Expected non-empty lumbar descendants from MovementKG"
+        )
+        assert "lumbar_spine" in lumbar_descendants, (
+            "Expected 'lumbar_spine' slug itself in descendants set"
+        )
+
+    def test_kg_lumbar_spine_exercises_stressing(self):
+        """
+        At least one exercise in the catalog stresses the lumbar_spine
+        (e.g. Walking Toe Touches, Cow Pose, SkiErg, Hamstring Walkout).
+        """
+        from app.data.loader import load_exercises
+        from app.graph.movement_kg import MovementKG
+        from app.ontology.catalog import build_concept_catalog
+
+        exercises = load_exercises()
+        concepts = build_concept_catalog()
+        kg = MovementKG(exercises, concepts, self.snomed)
+
+        lumbar_nodes = kg.descendants_by_part_of("lumbar_spine")
+        stressing = kg.exercises_stressing(lumbar_nodes)
+        assert len(stressing) > 0, (
+            "Expected at least one exercise stressing lumbar_spine, got none"
+        )
+
+    def test_knee_subtree_still_intact(self):
+        """Adding lumbar subtree must not break the knee subtree."""
+        descendants = get_descendants_by_part_of(self.snomed, "72696002")
+        assert "49076000" in descendants, (
+            "Knee joint (49076000) missing from knee region descendants after lumbar extension"
+        )
+        assert "57714003" in descendants, (
+            "Patellofemoral joint (57714003) missing from knee region descendants after lumbar extension"
+        )

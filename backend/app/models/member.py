@@ -141,6 +141,15 @@ class BloodPanel(BaseModel):
     vitamin_d_ng_ml: float | None = None
     ferritin_ng_ml: float | None = None
     crp_mg_l: float | None = None
+    # Hormone panel (Phase 6 — Mico profile)
+    testosterone_ng_dl: float | None = None
+    free_testosterone_pg_ml: float | None = None
+    cortisol_morning_mcg_dl: float | None = None
+    shbg_nmol_l: float | None = None
+    dhea_s_mcg_dl: float | None = None
+    igf1_ng_ml: float | None = None
+
+    model_config = {"extra": "allow"}
 
 
 class DexaScan(BaseModel):
@@ -195,6 +204,27 @@ class CoachBrief(BaseModel):
     generated_for: str
     morning_tasks: list[MorningTask] = Field(default_factory=list)
     churn_risk: ChurnRisk
+
+
+# ---------------------------------------------------------------------------
+# Member summary (for list endpoint / UI switcher)
+# ---------------------------------------------------------------------------
+
+
+class MemberSummary(BaseModel):
+    """
+    Lightweight summary returned by GET /api/members.
+
+    Contains only the fields needed to populate the member switcher UI.
+    """
+
+    member_id: str
+    name: str
+    age: int
+    sex: str
+    churn_risk_level: str
+    adherence_trend: str
+    active_injury: str | None = None  # e.g. "knee" or "lumbar spine"
 
 
 # ---------------------------------------------------------------------------
