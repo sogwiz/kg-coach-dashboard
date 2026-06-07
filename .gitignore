@@ -24,3 +24,8 @@ frontend/.vite/
 .vscode/
 .idea/
 
+
+# stray local test outputs
+/hyb.json
+/llm.json
+/m2.json
