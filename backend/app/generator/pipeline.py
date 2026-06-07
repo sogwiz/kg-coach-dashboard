@@ -25,6 +25,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from langchain_core.language_models import BaseChatModel
 
@@ -34,6 +35,9 @@ from app.models.exercise import Exercise
 from app.models.injury import Injury, InjuryState
 from app.models.member import MemberContext
 from app.models.plan import WorkoutPlan
+
+if TYPE_CHECKING:
+    from app.observability.decision_trace import DecisionStep
 
 
 # ---------------------------------------------------------------------------
@@ -168,11 +172,16 @@ class GeneratorOutput:
     selected_variant_id:
         Set when the coach explicitly picks a variant via /api/generate/select.
         None until a selection is made.
+    decision_trace:
+        Ordered list of DecisionStep records capturing every deterministic and
+        LLM step in the pipeline (Phase 7 observability).  None until the
+        generator builds it after the filter + structuring run.
     """
 
     variants: list[WorkoutVariant]
     trace: ConditionalFilterTrace
     selected_variant_id: str | None = None
+    decision_trace: "list[DecisionStep] | None" = None
 
 
 # ---------------------------------------------------------------------------
@@ -298,12 +307,22 @@ async def generate_workout(
         optimizes_for: str,
     ) -> WorkoutVariant:
         """Structure one variant using asyncio thread executor for blocking LLM call."""
+        from app.observability.tracing import tracing_config
+
         # Build a variant-specific intent string
         variant_intent = _build_variant_intent(
             coach_prompt=input.prompt,
             variant_id=variant_id,
             label=label,
             optimizes_for=optimizes_for,
+        )
+
+        # Build the tracing config for this variant's LLM call
+        run_cfg = tracing_config(
+            "structure_plan",
+            member_id=input.member_id,
+            variant_id=variant_id,
+            prompt=input.prompt,
         )
 
         loop = asyncio.get_event_loop()
@@ -316,6 +335,7 @@ async def generate_workout(
                 load_tolerance_pct=trace.load_tolerance_pct,
                 llm=llm,
                 injury_context=injury_context_str,
+                run_config=run_cfg,
             ),
         )
 
@@ -351,10 +371,50 @@ async def generate_workout(
     ]
     variants: list[WorkoutVariant] = list(await asyncio.gather(*variant_tasks))
 
+    # ------------------------------------------------------------------
+    # 5. Build the in-app decision trace (Phase 7 observability)
+    # ------------------------------------------------------------------
+    from app.observability.decision_trace import build_decision_trace
+
+    # Collect the movement type exclusions from the filter trace
+    excluded_mvt_types: set[str] | None = None
+    injured_node_ids_set: set[str] | None = None
+    injury_joint_slug: str | None = None
+
+    if injury is not None:
+        injury_joint_slug = injury.joint
+        injured_node_ids_set = kg.descendants_by_part_of(injury.joint)
+        from app.models.healing import PHASE_RESTRICTIONS
+        phase_restrictions = PHASE_RESTRICTIONS[injury.computed_phase()]
+        excluded_mvt_types = set(phase_restrictions.get("excluded_movement_types", []))
+        if trace.injury_state_used is not None:
+            for pain_type in trace.injury_state_used.pain_on:
+                excluded_mvt_types.add(pain_type)
+
+    removed_exercises_list = [
+        {"name": ex.name, "id": ex.id, "reason": reason}
+        for ex, reason in trace.removed
+    ]
+
+    decision_steps = build_decision_trace(
+        prompt=input.prompt,
+        member_id=input.member_id,
+        injury_joint=injury_joint_slug,
+        injured_node_ids=injured_node_ids_set,
+        excluded_movement_types=excluded_mvt_types,
+        available_equipment=available_equipment,
+        dislikes=dislikes,
+        safe_count=len(trace.safe),
+        removed_count=len(trace.removed),
+        removed_exercises=removed_exercises_list,
+        variant_ids=[vid for vid, _, _ in VARIANT_PROFILES],
+    )
+
     return GeneratorOutput(
         variants=variants,
         trace=trace,
         selected_variant_id=None,
+        decision_trace=decision_steps,
     )
 
 

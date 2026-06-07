@@ -160,6 +160,7 @@ def structure_plan(
     load_tolerance_pct: float,
     llm: BaseChatModel,
     injury_context: str = "none",
+    run_config: dict | None = None,
 ) -> WorkoutPlan:
     """
     Ask the LLM to structure safe exercises into a WorkoutPlan.
@@ -180,6 +181,9 @@ def structure_plan(
         Plain-language description of the member's active injury for the
         prompt, e.g. "left knee PFPS (pain on flexion), remodeling phase".
         Defaults to "none" when no injury is present.
+    run_config:
+        Optional RunnableConfig for LangSmith tracing (from tracing_config()).
+        When None, the call runs without tracing metadata.
 
     Returns
     -------
@@ -217,5 +221,9 @@ def structure_plan(
         HumanMessage(content=user_content),
     ]
 
-    plan: WorkoutPlan = structured_llm.invoke(messages)  # type: ignore[assignment]
+    invoke_kwargs: dict = {}
+    if run_config:
+        invoke_kwargs["config"] = run_config
+
+    plan: WorkoutPlan = structured_llm.invoke(messages, **invoke_kwargs)  # type: ignore[assignment]
     return plan

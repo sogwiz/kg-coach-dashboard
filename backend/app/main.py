@@ -9,7 +9,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import generator, injury, members
+from app.api.routes import copilot, generator, injury, members
 
 app = FastAPI(
     title="KG Coach Dashboard API",
@@ -40,3 +40,4 @@ async def health() -> dict[str, str]:
 app.include_router(members.router, prefix="/api")
 app.include_router(injury.router, prefix="/api")
 app.include_router(generator.router, prefix="/api")
+app.include_router(copilot.router, prefix="/api")

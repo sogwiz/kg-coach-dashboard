@@ -559,7 +559,7 @@ class TestThreeVariantScaffolding:
 
         mock_llm = MagicMock()
         structured_mock = MagicMock()
-        structured_mock.invoke.side_effect = lambda msgs: _mock_structure()
+        structured_mock.invoke.side_effect = lambda msgs, **kw: _mock_structure()
         mock_llm.with_structured_output.return_value = structured_mock
 
         member = load_member_context()
