@@ -25,7 +25,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.language_models import BaseChatModel
 
@@ -176,12 +176,17 @@ class GeneratorOutput:
         Ordered list of DecisionStep records capturing every deterministic and
         LLM step in the pipeline (Phase 7 observability).  None until the
         generator builds it after the filter + structuring run.
+    prov_documents:
+        Phase 12: per-variant PROV-O provenance documents (one per variant).
+        Keyed by variant_id.  None until the generator builds them.
+        This is ADDITIVE — the variants[] contract is unchanged.
     """
 
     variants: list[WorkoutVariant]
     trace: ConditionalFilterTrace
     selected_variant_id: str | None = None
     decision_trace: "list[DecisionStep] | None" = None
+    prov_documents: "dict[str, Any] | None" = None
 
 
 # ---------------------------------------------------------------------------
@@ -410,11 +415,42 @@ async def generate_workout(
         variant_ids=[vid for vid, _, _ in VARIANT_PROFILES],
     )
 
+    # ------------------------------------------------------------------
+    # 6. Build PROV-O provenance documents (Phase 12)
+    # ------------------------------------------------------------------
+    ended_at = datetime.now(tz=timezone.utc)
+    prov_documents: dict[str, Any] = {}
+
+    try:
+        from app.generator.provenance import build_provenance, prov_document_to_dict
+
+        for variant in variants:
+            constraints = {
+                "prompt": input.prompt,
+                "member_id": input.member_id,
+                "time_window_minutes": input.time_window_minutes,
+                "equipment_available": sorted(available_equipment),
+                "variant_id": variant.variant_id,
+            }
+            prov_doc = build_provenance(
+                plan=variant.plan,
+                trace=trace,
+                constraints=constraints,
+                timing=(started_at, ended_at),
+                variant_id=variant.variant_id,
+                injury_joint=injury_joint_slug,
+            )
+            prov_documents[variant.variant_id] = prov_document_to_dict(prov_doc)
+    except Exception:
+        # PROV-O is enrichment — never let it fail the generation pipeline
+        prov_documents = {}
+
     return GeneratorOutput(
         variants=variants,
         trace=trace,
         selected_variant_id=None,
         decision_trace=decision_steps,
+        prov_documents=prov_documents if prov_documents else None,
     )
 
 

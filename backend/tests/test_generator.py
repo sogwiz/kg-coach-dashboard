@@ -1634,3 +1634,230 @@ class TestLLMSequencing:
                 f"{section_name}: order values {orders} are not consecutive "
                 f"from 1 (expected {expected})"
             )
+
+
+# ---------------------------------------------------------------------------
+# 10. Refine endpoint — Phase 12 (deterministic, no API key required)
+# ---------------------------------------------------------------------------
+
+
+class TestRefineEndpoint:
+    """
+    Tests for PATCH /api/generate/refine.
+
+    These tests verify:
+      - The endpoint parses adjustment instructions correctly.
+      - Exclusion adjustments ("exclude X", "no X") add terms to dislikes so
+        the generator avoids exercises whose name contains those terms.
+      - The endpoint returns 503 without an API key (same as POST /api/generate).
+      - The refine endpoint returns 404 for unknown members.
+      - The _parse_adjustment helper correctly identifies exclusion vs. addition.
+
+    Full end-to-end refinement tests (with a live LLM call) are in the
+    TestRefineLLM class below, skipped without an API key.
+    """
+
+    def setup_method(self):
+        clear_store()
+
+    def teardown_method(self):
+        clear_store()
+
+    # -- _parse_adjustment unit tests (no HTTP call needed) --
+
+    def test_parse_adjustment_exclude_exercise(self):
+        """'exclude deadlifts' → dislikes includes 'deadlift'."""
+        from app.api.routes.generator import _parse_adjustment
+        dislikes, suffix = _parse_adjustment("exclude deadlifts")
+        assert len(dislikes) > 0, "Should produce at least one dislike term"
+        # At least one term that relates to 'deadlift'
+        combined = " ".join(dislikes)
+        assert "deadlift" in combined or "deadlift" in " ".join(dislikes)
+
+    def test_parse_adjustment_no_barbell(self):
+        """'no barbell' → dislikes includes 'barbell'."""
+        from app.api.routes.generator import _parse_adjustment
+        dislikes, suffix = _parse_adjustment("no barbell")
+        assert "barbell" in dislikes or any("barbell" in d for d in dislikes)
+
+    def test_parse_adjustment_add_core(self):
+        """'add more core' → suffix is non-empty, dislikes is empty."""
+        from app.api.routes.generator import _parse_adjustment
+        dislikes, suffix = _parse_adjustment("add more core")
+        assert suffix != "", "Should produce a non-empty prompt suffix for 'add more'"
+        assert len(dislikes) == 0 or all(
+            "core" not in d for d in dislikes
+        ), "Should not exclude 'core' when instruction is to add it"
+
+    def test_parse_adjustment_remove_jumping(self):
+        """'remove jumping exercises' → dislikes contains a jump-related term."""
+        from app.api.routes.generator import _parse_adjustment
+        dislikes, suffix = _parse_adjustment("remove jumping exercises")
+        combined = " ".join(dislikes)
+        assert "jump" in combined, f"Expected 'jump' in dislikes: {dislikes}"
+
+    def test_parse_adjustment_empty_prefix(self):
+        """Unknown prefix → treated conservatively as dislike terms."""
+        from app.api.routes.generator import _parse_adjustment
+        dislikes, suffix = _parse_adjustment("squat press")
+        # Should produce at least some output
+        assert len(dislikes) > 0 or suffix != ""
+
+    # -- HTTP endpoint tests --
+
+    def test_refine_returns_503_without_api_key(self, monkeypatch):
+        """PATCH /api/generate/refine returns 503 without ANTHROPIC_API_KEY."""
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+        from fastapi.testclient import TestClient
+        from app.api.routes import generator as gen_module
+        gen_module._get_llm.cache_clear()
+
+        from app.main import app
+        client = TestClient(app)
+
+        response = client.patch(
+            "/api/generate/refine",
+            json={
+                "member_id": "mbr_01HX9JORDAN",
+                "adjustment": "exclude deadlifts",
+            },
+        )
+        assert response.status_code == 503
+        gen_module._get_llm.cache_clear()
+
+    def test_refine_returns_404_for_unknown_member(self, monkeypatch):
+        """PATCH /api/generate/refine returns 404 for an unknown member_id."""
+        # We need the LLM check to pass first — mock the LLM
+        import unittest.mock as mock
+        from fastapi.testclient import TestClient
+        from app.api.routes import generator as gen_module
+        gen_module._get_llm.cache_clear()
+
+        # Make _get_llm return a non-None mock so we reach the member lookup
+        mock_llm = mock.MagicMock()
+        with mock.patch.object(gen_module, "_get_llm", return_value=mock_llm):
+            from app.main import app
+            client = TestClient(app)
+            response = client.patch(
+                "/api/generate/refine",
+                json={
+                    "member_id": "nonexistent_member_xyz",
+                    "adjustment": "exclude squats",
+                },
+            )
+        assert response.status_code == 404
+
+    def test_refine_dislikes_are_applied(self, monkeypatch, kg, all_exercises):
+        """
+        Verify that the _parse_adjustment + member dislikes logic causes
+        the named exercise to appear in the safe set only if its name doesn't
+        match the dislike term.
+
+        This is a unit test of the dislike filtering logic — not a full HTTP
+        test — because the HTTP test would require a live LLM call.
+        """
+        from app.api.routes.generator import _parse_adjustment
+        from app.graph.conditional_filter import conditional_safety_filter
+        from app.models.healing import compute_phase
+        from app.models.injury import Injury, InjuryState
+
+        # Build a knee injury
+        state = InjuryState(
+            injury_id="inj_knee_left",
+            recorded_at=datetime(2026, 6, 6, 8, 15, tzinfo=timezone.utc),
+            inflammation="none",
+            pain_on=["flexion"],
+            subjective_pain=2,
+            load_tolerance_pct=0.7,
+        )
+        days = (REF_DATE - date(2026, 5, 10)).days
+        phase = compute_phase(days)
+        injury = Injury(
+            id="inj_knee_left",
+            region="left knee",
+            joint="knee",
+            diagnosis="PFPS",
+            snomed_code="57773001",
+            onset_date=date(2026, 5, 10),
+            current_phase=phase,
+            states=[state],
+        )
+
+        # Parse "exclude barbell" → dislikes = {"barbell"}
+        dislikes, _ = _parse_adjustment("exclude barbell")
+        assert dislikes  # should have at least one term
+
+        trace = conditional_safety_filter(
+            candidates=all_exercises,
+            injury=injury,
+            available_equipment=ALL_EQUIPMENT,
+            excluded_ids=set(),
+            dislikes=dislikes,
+            kg=kg,
+            reference_date=REF_DATE,
+        )
+
+        # No exercise in the safe set should have "barbell" (case-insensitive)
+        # in its name
+        safe_names = [ex.name.lower() for ex in trace.safe]
+        barbell_safe = [n for n in safe_names if "barbell" in n]
+        assert len(barbell_safe) == 0, (
+            f"Found barbell exercises in safe set after 'exclude barbell': {barbell_safe}"
+        )
+
+
+@pytest.mark.skipif(not HAS_API_KEY, reason="ANTHROPIC_API_KEY not set")
+class TestRefineLLM:
+    """
+    End-to-end refine tests that require a live LLM call.
+    """
+
+    def setup_method(self):
+        clear_store()
+
+    def teardown_method(self):
+        clear_store()
+
+    def test_refine_excludes_named_exercise_from_all_variants(self, kg):
+        """
+        After PATCH /api/generate/refine with 'exclude barbell', no variant
+        in the response should include a barbell exercise.
+        """
+        from fastapi.testclient import TestClient
+        from app.api.routes import generator as gen_module
+        gen_module._get_llm.cache_clear()
+        gen_module._get_kg.cache_clear()
+
+        from app.main import app
+        client = TestClient(app)
+
+        response = client.patch(
+            "/api/generate/refine",
+            json={
+                "member_id": "mbr_01HX9JORDAN",
+                "adjustment": "exclude barbell",
+                "prompt": "full body strength",
+                "time_window_minutes": 45,
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert "variants" in data
+        assert len(data["variants"]) == 3
+
+        # Check: no variant plan should include a barbell exercise by name
+        for variant in data["variants"]:
+            all_exercises_in_plan = (
+                variant["plan"]["warmup"]
+                + variant["plan"]["main"]
+                + variant["plan"]["cooldown"]
+            )
+            barbell_exercises = [
+                ex["name"] for ex in all_exercises_in_plan
+                if "barbell" in ex["name"].lower()
+            ]
+            assert len(barbell_exercises) == 0, (
+                f"Variant '{variant['variant_id']}' contains barbell exercises "
+                f"after 'exclude barbell': {barbell_exercises}"
+            )

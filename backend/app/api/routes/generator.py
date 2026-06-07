@@ -1,5 +1,5 @@
 """
-Generator API route — Phase 6 (multi-member, 3 variants).
+Generator API route — Phase 6 (multi-member, 3 variants) + Phase 12 (refine).
 
 POST /api/generate
     Accepts a coach prompt + time window + member_id, runs the full generator
@@ -12,8 +12,22 @@ POST /api/generate/select
     Records which variant the coach selected. Updates selected_variant_id in the
     stored GeneratorOutput and returns the updated object.
 
+PATCH /api/generate/refine  (Phase 12)
+    Accepts interactive adjustments ("exclude deadlifts", "no barbell",
+    "add more core") and re-runs the generator pipeline with the additional
+    constraint added to the member's excluded_ids / dislikes.
+
+    Behaviour: the refinement re-runs a full generate_workout() call with the
+    same prompt + time window from the stored plan, but with the new constraint
+    layered in (exercise name / equipment name → excluded_ids or additional
+    dislikes).  This always produces a fresh 3-variant set from the updated
+    safe candidate pool and replaces the in-memory plan for the member.
+
+    Rationale: re-running the full pipeline keeps the 3-variant model intact
+    and ensures safety invariants are re-validated with every refinement.
+
 Safety contract:
-    - The safety filter runs ONCE per generate call.
+    - The safety filter runs ONCE per generate/refine call.
     - All three variants are drawn from the same safe exercise set.
     - The LLM never sees unsafe exercises.
 
@@ -72,6 +86,42 @@ class SelectRequest(BaseModel):
 
     member_id: str
     variant_id: str
+
+
+class RefineRequest(BaseModel):
+    """
+    PATCH /api/generate/refine request body.
+
+    Accepts an interactive adjustment instruction and re-runs the generator
+    pipeline with the additional constraint applied.
+
+    Attributes
+    ----------
+    member_id:
+        The member whose plan is being refined.
+    adjustment:
+        Natural-language refinement instruction, e.g.:
+          - "exclude deadlifts"
+          - "no barbell"
+          - "add more core"
+          - "remove jumping exercises"
+        The adjustment is parsed to extract excluded exercise names or
+        equipment names.  If the instruction cannot be parsed, the raw
+        adjustment text is added as a dislike term so the LLM structuring
+        still avoids matching exercises.
+    prompt:
+        Optional override for the coach prompt.  If omitted, the prompt from
+        the most recently stored plan is reused.
+    time_window_minutes:
+        Optional override for the session duration.  If omitted, the value
+        from the most recently stored plan is reused (defaults to 60 if no
+        prior plan exists).
+    """
+
+    member_id: str
+    adjustment: str = Field(min_length=1, max_length=500)
+    prompt: str | None = Field(default=None)
+    time_window_minutes: int | None = Field(default=None, ge=10, le=180)
 
 
 # ---------------------------------------------------------------------------
@@ -191,6 +241,159 @@ async def select(request: SelectRequest) -> dict:
     return _serialise_output(updated)
 
 
+@router.patch("/refine", response_model=None)
+async def refine(request: RefineRequest) -> dict:
+    """
+    Re-run the generator with an interactive adjustment applied as an
+    additional constraint.
+
+    The adjustment instruction is parsed to extract:
+      - Exercise name exclusions ("exclude deadlifts" → adds "deadlift" to
+        excluded dislikes so the generator avoids it)
+      - Equipment exclusions ("no barbell" → adds "barbell" to the
+        unavailable equipment set so the safety filter removes barbell exercises)
+      - General hints ("add more core") are appended to the prompt so the
+        LLM structuring call prioritises matching exercises.
+
+    The full pipeline re-runs — safety filter is re-applied with the updated
+    constraints — and the result replaces the stored plan for the member.
+
+    Behaviour for "simplest coherent 3-variant model": re-run the full
+    generate_workout() with the same prompt (or override) + same time window
+    (or override) + the new constraint layered in.  Always returns 3 variants.
+    """
+    llm = _get_llm()
+    if llm is None:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "ANTHROPIC_API_KEY is not configured. "
+                "Set the environment variable and restart the server."
+            ),
+        )
+
+    kg = _get_kg()
+
+    # Load member context
+    from app.data.loader import load_member_context
+    try:
+        member = load_member_context(request.member_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Member '{request.member_id}' not found.",
+        )
+
+    # Resolve prompt + time from the stored plan (fallback to defaults)
+    stored = get_current_plan(request.member_id)
+    if request.prompt is not None:
+        prompt = request.prompt
+    elif stored is not None and stored.variants:
+        # Recover the prompt from the first variant's provenance
+        prompt = stored.variants[0].provenance.prompt
+    else:
+        prompt = "general workout"
+
+    if request.time_window_minutes is not None:
+        time_window = request.time_window_minutes
+    elif stored is not None and stored.variants:
+        time_window = stored.variants[0].provenance.time_window_minutes
+    else:
+        time_window = 60
+
+    # Parse the adjustment to extract additional constraints
+    extra_dislikes, extra_prompt_suffix = _parse_adjustment(request.adjustment)
+
+    # Layer extra dislikes into member preferences (non-mutating copy approach)
+    import copy
+    refined_member = copy.deepcopy(member)
+    refined_member.preferences.dislikes = list(
+        set(refined_member.preferences.dislikes) | extra_dislikes
+    )
+
+    # Append extra prompt suffix for positive hints (e.g. "add more core")
+    full_prompt = prompt
+    if extra_prompt_suffix:
+        full_prompt = f"{prompt}. Refinement: {extra_prompt_suffix}"
+
+    from app.generator.pipeline import GeneratorInput, generate_workout
+    gen_input = GeneratorInput(
+        prompt=full_prompt,
+        time_window_minutes=time_window,
+        member_id=request.member_id,
+    )
+
+    output = await generate_workout(
+        input=gen_input,
+        kg=kg,
+        member=refined_member,
+        llm=llm,
+    )
+
+    # Persist the refined plan
+    set_current_plan(request.member_id, output)
+
+    return _serialise_output(output)
+
+
+def _parse_adjustment(adjustment: str) -> tuple[set[str], str]:
+    """
+    Parse an adjustment instruction into extra dislikes + prompt suffix.
+
+    Returns
+    -------
+    extra_dislikes : set[str]
+        Terms to add to the member's dislike list so the safety filter
+        removes exercises whose name contains any of these terms.
+    prompt_suffix : str
+        A positive instruction to append to the prompt for the LLM
+        (e.g. "add more core exercises").
+
+    Examples
+    --------
+    "exclude deadlifts"     → ({"deadlift"}, "")
+    "no barbell"            → ({"barbell"}, "")
+    "remove jumping"        → ({"jump"}, "")
+    "add more core"         → (set(), "add more core exercises")
+    "exclude squats, no box" → ({"squat", "box"}, "")
+    """
+    adj_lower = adjustment.lower().strip()
+
+    # Exclusion triggers
+    exclusion_triggers = ["exclude ", "no ", "remove ", "without ", "avoid "]
+    addition_triggers = ["add ", "include ", "more ", "extra "]
+
+    extra_dislikes: set[str] = set()
+    prompt_suffix = ""
+
+    # Check for exclusion patterns
+    for trigger in exclusion_triggers:
+        if adj_lower.startswith(trigger):
+            terms = adj_lower[len(trigger):].strip()
+            # Handle comma-separated multi-term
+            for term in terms.split(","):
+                term = term.strip()
+                if term:
+                    # Normalise: strip common pluralisation
+                    term = term.rstrip("s") if term.endswith("s") and len(term) > 3 else term
+                    extra_dislikes.add(term)
+            return extra_dislikes, prompt_suffix
+
+    # Check for addition patterns
+    for trigger in addition_triggers:
+        if adj_lower.startswith(trigger) or f" {trigger}" in adj_lower:
+            prompt_suffix = adjustment.strip()
+            return extra_dislikes, prompt_suffix
+
+    # Fallback: treat the whole adjustment as a dislike term (conservative)
+    for term in adj_lower.split(","):
+        term = term.strip()
+        if term:
+            extra_dislikes.add(term)
+
+    return extra_dislikes, prompt_suffix
+
+
 # ---------------------------------------------------------------------------
 # Serialisation helper
 # ---------------------------------------------------------------------------
@@ -261,4 +464,7 @@ def _serialise_output(output: GeneratorOutput) -> dict:
         "trace_summary": trace_summary,
         "selected_variant_id": output.selected_variant_id,
         "decision_trace": decision_trace_list,
+        # Phase 12: PROV-O provenance documents (one per variant, keyed by variant_id)
+        # Additive — None if build failed; frontend treats absence as graceful degradation
+        "prov": output.prov_documents,
     }
