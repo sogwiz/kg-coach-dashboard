@@ -1,5 +1,5 @@
 """
-Phase 3 validation: Movement Knowledge Graph
+Phase 3 + 7.1 validation: Movement Knowledge Graph
 
 Checks:
   - Graph loads with all exercises, concepts, and SNOMED data
@@ -9,6 +9,14 @@ Checks:
   - Squats are tagged with knee:flexion
   - Leg extensions/hamstring walkouts are tagged with knee:extension
   - Equipment exclusion via graph edges works correctly
+
+Phase 7.1 additions (R3 KG1 gap-closing):
+  - EDGE_CONTRAINDICATED_FOR constant is exported
+  - contraindicated-for edges exist for Jordan's knee injury (flexion/impact/load)
+  - contraindicated-for edges exist for Mico's lumbar injury (flexion/load/rotation)
+  - contraindicated_exercises("knee") returns knee-flexion/impact exercises
+  - contraindicated_exercises("lumbar_spine") returns lumbar-loading exercises
+  - list_contraindicated_for_edges() returns the full edge list for Graph Explorer
 """
 
 from __future__ import annotations
@@ -321,3 +329,167 @@ class TestEquipmentEdges:
             assert len(requires_edges) == 0, (
                 f"Exercise '{ex.name}' has no equipment but has requires edges: {requires_edges}"
             )
+
+
+# ---------------------------------------------------------------------------
+# Phase 7.1 — contraindicated-for edges (R3 KG1 gap-closing)
+# ---------------------------------------------------------------------------
+
+
+class TestContraindicatedForEdges:
+    """
+    Tests for the static 'contraindicated-for' edges materialised in Phase 7.1.
+
+    These edges represent the static 'textbook' contraindication view:
+      injury_concept_node --contraindicated-for--> exercise_node
+
+    The runtime authority for a specific injury state remains the
+    conditional_safety_filter (dynamic, per-check-in).  These static edges
+    are for the Graph Explorer and explainability.
+    """
+
+    def test_edge_constant_exported(self):
+        """EDGE_CONTRAINDICATED_FOR constant is exported from movement_kg."""
+        from app.graph.movement_kg import EDGE_CONTRAINDICATED_FOR
+        assert EDGE_CONTRAINDICATED_FOR == "contraindicated-for"
+
+    def test_knee_injury_concept_node_exists(self, kg):
+        """The graph should have an injury_concept node for 'knee'."""
+        g = kg.graph
+        assert g.has_node("injury_concept_knee"), (
+            "Expected 'injury_concept_knee' node in MovementKG graph"
+        )
+        node_data = g.nodes["injury_concept_knee"]
+        assert node_data.get("node_type") == "injury_concept"
+
+    def test_lumbar_injury_concept_node_exists(self, kg):
+        """The graph should have an injury_concept node for 'lumbar_spine'."""
+        g = kg.graph
+        assert g.has_node("injury_concept_lumbar_spine"), (
+            "Expected 'injury_concept_lumbar_spine' node in MovementKG graph"
+        )
+
+    def test_knee_contraindicates_flexion_exercises(self, kg, exercises):
+        """
+        Jordan's knee injury: knee flexion exercises should be contraindicated.
+
+        Exercises tagged with knee:flexion (e.g. squats, lunges) should appear
+        in the contraindicated_exercises("knee") set.
+        """
+        contra = kg.contraindicated_exercises("knee")
+        assert len(contra) > 0, (
+            "Expected at least one exercise contraindicated for knee injury"
+        )
+
+        # Exercises with knee:flexion annotation should be contraindicated
+        flexion_ids = kg.exercises_by_movement_type("knee", "flexion")
+        overlap = contra & flexion_ids
+        assert len(overlap) > 0, (
+            f"Expected knee-flexion exercises to be in contraindicated set. "
+            f"Knee flexion: {len(flexion_ids)}, contraindicated: {len(contra)}, "
+            f"overlap: {len(overlap)}"
+        )
+
+    def test_knee_contraindicates_impact_exercises(self, kg, exercises):
+        """
+        Knee injury: impact exercises (jumps, plyometrics) should be
+        contraindicated.
+        """
+        contra = kg.contraindicated_exercises("knee")
+        impact_ids = kg.exercises_by_movement_type("knee", "impact")
+
+        if impact_ids:
+            overlap = contra & impact_ids
+            assert len(overlap) > 0, (
+                f"Expected knee-impact exercises to be contraindicated. "
+                f"Impact: {impact_ids}, contraindicated: {contra}"
+            )
+
+    def test_lumbar_contraindicates_flexion_load_exercises(self, kg, exercises):
+        """
+        Mico's lumbar injury: lumbar flexion and load exercises (deadlifts,
+        good mornings, bent-over rows) should be contraindicated.
+        """
+        contra = kg.contraindicated_exercises("lumbar_spine")
+        assert len(contra) > 0, (
+            "Expected at least one exercise contraindicated for lumbar_spine injury"
+        )
+
+        # Exercises with lumbar:flexion or lumbar:load should be contraindicated
+        lumbar_flexion = kg.exercises_by_movement_type("lumbar_spine", "flexion")
+        lumbar_load = kg.exercises_by_movement_type("lumbar_spine", "load")
+        lumbar_triggered = lumbar_flexion | lumbar_load
+
+        if lumbar_triggered:
+            overlap = contra & lumbar_triggered
+            assert len(overlap) > 0, (
+                f"Expected lumbar flexion/load exercises to be contraindicated. "
+                f"Lumbar-triggered: {len(lumbar_triggered)}, contraindicated: {len(contra)}"
+            )
+
+    def test_unknown_injury_returns_empty(self, kg):
+        """contraindicated_exercises for an unknown joint returns an empty set."""
+        result = kg.contraindicated_exercises("fictional_joint_xyz")
+        assert result == set()
+
+    def test_contraindicated_for_edges_in_graph(self, kg):
+        """
+        The graph should have at least some 'contraindicated-for' edges for
+        known injury concepts (knee, lumbar_spine).
+        """
+        from app.graph.movement_kg import EDGE_CONTRAINDICATED_FOR
+        g = kg.graph
+        contra_edges = [
+            (s, t) for s, t, d in g.edges(data=True)
+            if d.get("relation") == EDGE_CONTRAINDICATED_FOR
+        ]
+        assert len(contra_edges) > 0, (
+            "Expected at least one 'contraindicated-for' edge in the graph"
+        )
+
+    def test_list_contraindicated_for_edges_returns_list(self, kg):
+        """list_contraindicated_for_edges returns a non-empty list of dicts."""
+        edges = kg.list_contraindicated_for_edges()
+        assert isinstance(edges, list)
+        assert len(edges) > 0, (
+            "Expected at least one entry from list_contraindicated_for_edges()"
+        )
+
+    def test_list_contraindicated_for_edges_schema(self, kg):
+        """Each edge entry has the expected keys for the Graph Explorer."""
+        edges = kg.list_contraindicated_for_edges()
+        required_keys = {"injury_concept", "joint_slug", "exercise_id", "exercise_name", "movement_types"}
+        for edge in edges:
+            assert required_keys <= set(edge.keys()), (
+                f"Edge entry missing required keys. Got: {set(edge.keys())}"
+            )
+            assert isinstance(edge["movement_types"], list)
+            assert isinstance(edge["exercise_name"], str)
+            assert len(edge["exercise_name"]) > 0
+
+    def test_knee_contra_edges_reference_valid_exercises(self, kg, exercises):
+        """All exercise_ids in knee contraindicated-for edges exist in the catalog."""
+        exercise_ids = {ex.id for ex in exercises}
+        contra = kg.contraindicated_exercises("knee")
+        for ex_id in contra:
+            assert ex_id in exercise_ids, (
+                f"Contraindicated exercise id '{ex_id}' not found in catalog"
+            )
+
+    def test_lumbar_contra_edges_reference_valid_exercises(self, kg, exercises):
+        """All exercise_ids in lumbar contraindicated-for edges exist in the catalog."""
+        exercise_ids = {ex.id for ex in exercises}
+        contra = kg.contraindicated_exercises("lumbar_spine")
+        for ex_id in contra:
+            assert ex_id in exercise_ids, (
+                f"Contraindicated exercise id '{ex_id}' not found in catalog"
+            )
+
+    def test_injury_concept_joint_slug_attribute(self, kg):
+        """Injury concept nodes carry the joint_slug attribute."""
+        g = kg.graph
+        for node_id, data in g.nodes(data=True):
+            if data.get("node_type") == "injury_concept":
+                assert "joint_slug" in data, (
+                    f"injury_concept node '{node_id}' missing joint_slug attribute"
+                )

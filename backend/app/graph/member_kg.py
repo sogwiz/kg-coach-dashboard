@@ -1,5 +1,5 @@
 """
-Member Context KG — Phase 7.
+Member Context KG — Phase 7 + 7.1 (R2/R3 gap-closing).
 
 Models a member's context as graph nodes that SHARE concept nodes (joint,
 equipment) with the Movement KG.  This allows queries like "what equipment
@@ -9,6 +9,14 @@ movement/safety graph.
 
 The Member KG is intentionally thin — its value is the unified query API
 that the Copilot agent tools use, not complex graph algorithms.
+
+Phase 7.1 additions (R3 KG2 gap-closing):
+  - get_goals()            → list[Goal]
+  - get_preferences()      → Preferences
+  - get_lab_results()      → Labs  (blood panel + DEXA scan)
+  - get_workout_history()  → list[WorkoutSession]
+  - get_chat_history()     → list[ChatMessage]
+  - get_biomarkers()       now returns full Biomarkers incl. RHR/HRV/sleep
 
 Usage
 -----
@@ -24,7 +32,12 @@ Usage
     adherence  = mkg.get_adherence_series(weeks=4)
     equipment  = mkg.get_equipment()      # set[str]
     brief      = mkg.get_coach_brief()    # CoachBrief
-    biomarkers = mkg.get_biomarkers()     # Biomarkers
+    biomarkers = mkg.get_biomarkers()     # Biomarkers (RHR, HRV, sleep, weight)
+    goals      = mkg.get_goals()          # list[Goal]
+    prefs      = mkg.get_preferences()   # Preferences
+    labs       = mkg.get_lab_results()   # Labs (blood_panel + dexa_scan)
+    history    = mkg.get_workout_history() # list[WorkoutSession]
+    chat       = mkg.get_chat_history()  # list[ChatMessage]
 """
 
 from __future__ import annotations
@@ -40,7 +53,7 @@ from app.ontology.concepts import Concept
 
 if TYPE_CHECKING:
     from app.models.injury import Injury
-    from app.models.member import Biomarkers
+    from app.models.member import Biomarkers, ChatMessage, Goal, Labs, Preferences, WorkoutSession
 
 
 # ---------------------------------------------------------------------------
@@ -172,6 +185,47 @@ class MemberKG:
                     )
                 self._g.add_edge(member_id, local_id, relation="has_equipment")
 
+        # 5. Goal nodes — one node per goal, linked to member
+        for goal in member.goals:
+            goal_node_id = f"goal_{goal.id}"
+            self._g.add_node(
+                goal_node_id,
+                node_type="goal",
+                goal_id=goal.id,
+                text=goal.text,
+                priority=goal.priority,
+                target_date=goal.target_date,
+            )
+            self._g.add_edge(member_id, goal_node_id, relation="has_goal")
+
+        # 6. Workout-history nodes — one per session, linked to member
+        for session in member.workout_history:
+            sess_node_id = f"session_{member_id}_{session.date}"
+            self._g.add_node(
+                sess_node_id,
+                node_type="workout_session",
+                date=session.date,
+                title=session.title,
+                completed=session.completed,
+                duration_min=session.duration_min,
+                rpe=session.rpe,
+            )
+            self._g.add_edge(member_id, sess_node_id, relation="has_workout_session")
+
+        # 7. Chat-history nodes — one per message, linked to member
+        for msg in member.chat_history:
+            # Use ts as unique-enough id (ts + sender)
+            msg_node_id = f"chat_{member_id}_{msg.ts}_{msg.from_}"
+            self._g.add_node(
+                msg_node_id,
+                node_type="chat_message",
+                ts=msg.ts,
+                from_=msg.from_,
+                text=msg.text,
+                has_attachments=len(msg.attachments) > 0,
+            )
+            self._g.add_edge(member_id, msg_node_id, relation="has_chat_message")
+
     # ------------------------------------------------------------------
     # Query API
     # ------------------------------------------------------------------
@@ -232,9 +286,63 @@ class MemberKG:
         Return the member's latest biomarker data.
 
         Contains resting_hr_bpm, hrv_ms, sleep_hours_last_7_days,
-        weight_trend_kg.
+        weight_trend_kg.  All fields are sourced directly from the member
+        context — the Copilot reads these values verbatim (no fabrication).
         """
         return self._member.biomarkers
+
+    def get_goals(self) -> "list[Goal]":
+        """
+        Return the member's goals (R3 KG2 — goals node).
+
+        Each Goal has: id, text, priority, target_date.
+        Goals are also represented as nodes in the KG linked via has_goal edges.
+        """
+        from app.models.member import Goal
+        return list(self._member.goals)
+
+    def get_preferences(self) -> "Preferences":
+        """
+        Return the member's training preferences (R3 KG2 — preferences node).
+
+        Contains preferred_session_minutes, training_days_per_week,
+        preferred_days, dislikes, notes.
+        """
+        from app.models.member import Preferences
+        return self._member.preferences
+
+    def get_lab_results(self) -> "Labs":
+        """
+        Return the member's latest lab results (R3 KG2 — labs node).
+
+        Contains blood_panel (lipids, HbA1c, vitamin D, ferritin, CRP,
+        and hormone panel where applicable) and dexa_scan (body composition).
+        Either sub-field may be None if not available for this member.
+        """
+        from app.models.member import Labs
+        return self._member.labs
+
+    def get_workout_history(self) -> "list[WorkoutSession]":
+        """
+        Return the member's logged workout sessions (R3 KG2 — workout history).
+
+        Each WorkoutSession has: date, title, planned, completed,
+        duration_min, rpe, exercises (list of exercise name strings).
+        Sessions are also represented as nodes linked via has_workout_session edges.
+        """
+        from app.models.member import WorkoutSession
+        return list(self._member.workout_history)
+
+    def get_chat_history(self) -> "list[ChatMessage]":
+        """
+        Return the member's chat history (R3 KG2 — chat history, R2 history).
+
+        Each ChatMessage has: ts, from_ (member/coach), text, attachments.
+        Attachments carry type and optional caption (images for multimodal).
+        Messages are also represented as nodes linked via has_chat_message edges.
+        """
+        from app.models.member import ChatMessage
+        return list(self._member.chat_history)
 
     def get_member_id(self) -> str:
         """Return the member's stable id."""

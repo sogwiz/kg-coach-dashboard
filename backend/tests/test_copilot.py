@@ -1,5 +1,5 @@
 """
-Phase 7 validation: Copilot Agent + Observability
+Phase 7 + 7.1 validation: Copilot Agent + Observability
 
 Tests:
   1. Deterministic tool function tests (no LLM, no API key):
@@ -10,21 +10,36 @@ Tests:
      - current_workout_plan returns "no plan" marker when store is empty
      - current_workout_plan returns plan data after set_current_plan
 
-  2. Observability — no API key required:
+  2. Phase 7.1 — new tool function tests (deterministic, no API key):
+     - lab_results returns blood panel + DEXA for both members
+     - body_composition returns DEXA and weight trend
+     - workout_history returns recent sessions
+     - goals_and_preferences returns goals + prefs
+     - chat_history_search returns messages, filters by query
+     - anti-fabrication: unknown member returns error (not invented data)
+
+  3. Observability — no API key required:
      - tracing_config returns a RunnableConfig without crashing when no key
      - tracing_config with LANGCHAIN_TRACING_V2=true + key returns metadata
      - langsmith_enabled() returns False when env vars are not set
      - build_decision_trace returns ordered steps with correct kinds
 
-  3. LLM-live agent tests (skipped without ANTHROPIC_API_KEY):
+  4. LLM-live agent tests (skipped without ANTHROPIC_API_KEY):
      - test_adherence_tool_invoked: agent calls adherence_trend when asked about
        adherence
      - test_workout_awareness: after a plan is set in the store, asking "why
        were these exercises chosen?" invokes current_workout_plan and the
        answer references the plan's rationale/stimulus
+     - test_conversation_memory: two sequential turns in the same thread
+       show that the second response has context from the first (memory)
+     - test_anti_fabrication_unknown_member: asking about an unknown member
+       returns an error, not invented data
 
-All deterministic tests (tool functions, MemberKG queries, tracing_config
-no-key behavior, decision_trace building) run without an API key.
+  5. Copilot API endpoint smoke tests (deterministic):
+     - chat_history endpoint returns Jordan's and Mico's chat history
+     - CopilotRequest accepts attachments field (multimodal schema)
+
+All deterministic tests run without an API key.
 """
 
 from __future__ import annotations
@@ -37,10 +52,15 @@ import pytest
 
 from app.copilot.agent import (
     adherence_trend,
+    body_composition,
+    chat_history_search,
     current_workout_plan,
+    goals_and_preferences,
     injury_status,
+    lab_results,
     morning_brief,
     sleep_summary,
+    workout_history,
 )
 from app.generator.store import clear_store, set_current_plan
 from app.observability.decision_trace import DecisionStep, build_decision_trace
@@ -295,7 +315,257 @@ class TestToolFunctions:
 
 
 # ---------------------------------------------------------------------------
-# 2. Observability — tracing_config and decision_trace (no API key)
+# 2. Phase 7.1 — new tool function tests (deterministic, no API key)
+# ---------------------------------------------------------------------------
+
+
+class TestPhase71ToolFunctions:
+    """Test Phase 7.1 tool functions — no LLM invocation required."""
+
+    # --- lab_results ---
+
+    def test_lab_results_jordan_structure(self):
+        """lab_results for Jordan returns blood_panel and dexa_scan keys."""
+        result = lab_results(JORDAN_ID)
+        assert isinstance(result, dict)
+        assert "member_id" in result
+        assert result["member_id"] == JORDAN_ID
+        assert "blood_panel" in result
+        assert "dexa_scan" in result
+
+    def test_lab_results_jordan_blood_panel_values(self):
+        """Jordan's blood panel contains expected fields with float values."""
+        result = lab_results(JORDAN_ID)
+        bp = result["blood_panel"]
+        assert bp is not None, "Jordan should have a blood panel"
+        assert isinstance(bp["ldl_mg_dl"], float)
+        assert isinstance(bp["hdl_mg_dl"], float)
+        assert isinstance(bp["date"], str)
+
+    def test_lab_results_jordan_dexa_values(self):
+        """Jordan's DEXA scan data is present."""
+        result = lab_results(JORDAN_ID)
+        dexa = result["dexa_scan"]
+        assert dexa is not None, "Jordan should have a DEXA scan"
+        assert isinstance(dexa["body_fat_pct"], float)
+        assert isinstance(dexa["lean_mass_kg"], float)
+
+    def test_lab_results_mico_has_hormone_panel(self):
+        """Mico's blood panel includes testosterone and cortisol."""
+        result = lab_results(MICO_ID)
+        bp = result["blood_panel"]
+        assert bp is not None
+        assert bp["testosterone_ng_dl"] is not None, "Mico should have testosterone"
+        assert bp["cortisol_morning_mcg_dl"] is not None, "Mico should have cortisol"
+
+    def test_lab_results_unknown_member_returns_error(self):
+        """lab_results for unknown member returns error dict."""
+        result = lab_results("mbr_UNKNOWN_XYZ")
+        assert "error" in result
+
+    def test_lab_results_data_source_is_kg(self):
+        """lab_results identifies Member KG as the data source (anti-fabrication audit)."""
+        result = lab_results(JORDAN_ID)
+        assert "data_source" in result
+        assert "KG" in result["data_source"] or "kg" in result["data_source"].lower()
+
+    # --- body_composition ---
+
+    def test_body_composition_jordan_structure(self):
+        """body_composition for Jordan returns dexa_scan and weight_trend_kg."""
+        result = body_composition(JORDAN_ID)
+        assert isinstance(result, dict)
+        assert "dexa_scan" in result
+        assert "weight_trend_kg" in result
+        assert result["dexa_scan"]["available"] is True
+
+    def test_body_composition_mico_lower_body_fat(self):
+        """Mico's body fat % from DEXA is lower than Jordan's (fit male athlete)."""
+        jordan_result = body_composition(JORDAN_ID)
+        mico_result = body_composition(MICO_ID)
+        jordan_bf = jordan_result["dexa_scan"]["body_fat_pct"]
+        mico_bf = mico_result["dexa_scan"]["body_fat_pct"]
+        assert mico_bf < jordan_bf, (
+            f"Mico's body fat ({mico_bf}%) should be lower than Jordan's ({jordan_bf}%)"
+        )
+
+    def test_body_composition_weight_trend_is_list(self):
+        """body_composition returns a list of weight data points."""
+        result = body_composition(JORDAN_ID)
+        assert isinstance(result["weight_trend_kg"], list)
+        assert len(result["weight_trend_kg"]) > 0
+
+    # --- workout_history ---
+
+    def test_workout_history_jordan_structure(self):
+        """workout_history for Jordan returns sessions with expected keys."""
+        result = workout_history(JORDAN_ID)
+        assert isinstance(result, dict)
+        assert "sessions" in result
+        assert isinstance(result["sessions"], list)
+        assert "total_logged" in result
+        assert result["total_logged"] > 0
+
+    def test_workout_history_sessions_have_required_fields(self):
+        """workout_history sessions include date, title, completed, rpe."""
+        result = workout_history(JORDAN_ID)
+        for s in result["sessions"]:
+            assert "date" in s
+            assert "title" in s
+            assert "completed" in s
+
+    def test_workout_history_respects_limit(self):
+        """workout_history respects the limit parameter."""
+        result = workout_history(JORDAN_ID, limit=2)
+        assert len(result["sessions"]) <= 2
+
+    def test_workout_history_mico_structure(self):
+        """workout_history for Mico returns his recent sessions."""
+        result = workout_history(MICO_ID)
+        assert result["total_logged"] > 0
+        assert len(result["sessions"]) > 0
+
+    def test_workout_history_unknown_member_returns_error(self):
+        """workout_history for unknown member returns error dict."""
+        result = workout_history("mbr_UNKNOWN_XYZ")
+        assert "error" in result
+
+    # --- goals_and_preferences ---
+
+    def test_goals_and_preferences_jordan_structure(self):
+        """goals_and_preferences for Jordan returns goals + preferences."""
+        result = goals_and_preferences(JORDAN_ID)
+        assert isinstance(result, dict)
+        assert "goals" in result
+        assert "preferences" in result
+        assert isinstance(result["goals"], list)
+        assert len(result["goals"]) > 0
+
+    def test_goals_and_preferences_jordan_has_knee_goal(self):
+        """Jordan's goals include a knee-related goal."""
+        result = goals_and_preferences(JORDAN_ID)
+        texts = " ".join(g["text"].lower() for g in result["goals"])
+        assert "knee" in texts or "squat" in texts
+
+    def test_goals_and_preferences_mico_hormone_goal(self):
+        """Mico's goals include hormone optimization."""
+        result = goals_and_preferences(MICO_ID)
+        texts = " ".join(g["text"].lower() for g in result["goals"])
+        assert any(kw in texts for kw in ("hormone", "testosterone", "hyrox", "lumbar"))
+
+    def test_goals_sorted_by_priority(self):
+        """Goals returned by goals_and_preferences are sorted by priority."""
+        result = goals_and_preferences(JORDAN_ID)
+        priorities = [g["priority"] for g in result["goals"]]
+        assert priorities == sorted(priorities), (
+            f"Goals should be sorted by priority. Got: {priorities}"
+        )
+
+    def test_preferences_has_expected_keys(self):
+        """Preferences dict contains expected keys."""
+        result = goals_and_preferences(JORDAN_ID)
+        prefs = result["preferences"]
+        assert "preferred_session_minutes" in prefs
+        assert "training_days_per_week" in prefs
+        assert "dislikes" in prefs
+        assert isinstance(prefs["dislikes"], list)
+
+    def test_goals_and_preferences_unknown_member_returns_error(self):
+        """goals_and_preferences for unknown member returns error dict."""
+        result = goals_and_preferences("mbr_UNKNOWN_XYZ")
+        assert "error" in result
+
+    # --- chat_history_search ---
+
+    def test_chat_history_search_jordan_all_messages(self):
+        """chat_history_search with no query returns all of Jordan's messages."""
+        result = chat_history_search(JORDAN_ID)
+        assert isinstance(result, dict)
+        assert "messages" in result
+        assert result["total_messages"] > 0
+
+    def test_chat_history_search_messages_have_required_fields(self):
+        """Chat messages have ts, from, text, attachments."""
+        result = chat_history_search(JORDAN_ID)
+        for msg in result["messages"]:
+            assert "ts" in msg
+            assert "from" in msg
+            assert "text" in msg
+            assert "attachments" in msg
+            assert msg["from"] in ("member", "coach")
+
+    def test_chat_history_search_query_filters(self):
+        """chat_history_search with a query returns only matching messages."""
+        result = chat_history_search(JORDAN_ID, query="knee")
+        # Jordan has messages mentioning knee
+        assert result["total_messages"] > 0
+        for msg in result["messages"]:
+            assert "knee" in msg["text"].lower(), (
+                f"Filtered message should contain 'knee': {msg['text']}"
+            )
+
+    def test_chat_history_search_empty_query_returns_all(self):
+        """chat_history_search with empty query returns all messages."""
+        all_result = chat_history_search(JORDAN_ID, query="")
+        filtered_result = chat_history_search(JORDAN_ID, query="knee")
+        # Filtered should be <= total
+        assert filtered_result["total_messages"] <= all_result["total_messages"]
+
+    def test_chat_history_search_mico_has_messages(self):
+        """chat_history_search for Mico returns his chat history."""
+        result = chat_history_search(MICO_ID)
+        assert result["total_messages"] > 0
+
+    def test_chat_history_search_mico_back_related(self):
+        """Mico's chat history has back/lumbar related messages."""
+        result = chat_history_search(MICO_ID, query="back")
+        assert result["total_messages"] > 0, (
+            "Mico should have messages mentioning 'back'"
+        )
+
+    def test_chat_history_search_unknown_member_returns_error(self):
+        """chat_history_search for unknown member returns error dict."""
+        result = chat_history_search("mbr_UNKNOWN_XYZ")
+        assert "error" in result
+
+    def test_chat_history_search_data_source_is_kg(self):
+        """chat_history_search identifies Member KG as data source."""
+        result = chat_history_search(JORDAN_ID)
+        assert "data_source" in result
+
+    # --- anti-fabrication: unknown member path ---
+
+    def test_all_tools_return_error_not_fabrication_for_unknown_member(self):
+        """
+        Anti-fabrication: every tool function returns an error dict (not
+        invented data) when given an unknown member_id.
+        """
+        fake_id = "mbr_DOES_NOT_EXIST_12345"
+        tool_fns = [
+            adherence_trend,
+            morning_brief,
+            injury_status,
+            sleep_summary,
+            lab_results,
+            body_composition,
+            workout_history,
+            goals_and_preferences,
+            chat_history_search,
+        ]
+        for fn in tool_fns:
+            result = fn(fake_id)
+            assert "error" in result, (
+                f"Tool '{fn.__name__}' should return an error for unknown member, "
+                f"got: {result}"
+            )
+            # The error should mention the member id — not invent data
+            assert fake_id in result["error"] or "not found" in result["error"].lower(), (
+                f"Tool '{fn.__name__}' error message should identify the missing member"
+            )
+
+
+# ---------------------------------------------------------------------------
+# 3. Observability — tracing_config and decision_trace (no API key)
 # ---------------------------------------------------------------------------
 
 
@@ -629,12 +899,152 @@ class TestCopilotAgentLive:
 
 
 # ---------------------------------------------------------------------------
-# 4. Copilot API endpoint smoke tests
+# 4. Phase 7.1 LLM-live agent tests (skipped without ANTHROPIC_API_KEY)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.skipif(not HAS_API_KEY, reason="ANTHROPIC_API_KEY not set")
+class TestCopilotAgentLivePhase71:
+    """Phase 7.1 LLM-live tests. Skipped without API key."""
+
+    @pytest.fixture(autouse=True)
+    def cleanup_store(self):
+        clear_store()
+        yield
+        clear_store()
+
+    def _build_agent_for_member(self, member_id: str):
+        """Build the copilot agent for the given member."""
+        from app.copilot.agent import create_copilot_agent, get_copilot_llm
+        from app.data.loader import load_member_context
+        from app.graph.member_kg import MemberKG
+        from app.ontology.catalog import build_concept_catalog
+
+        llm = get_copilot_llm()
+        assert llm is not None
+        member = load_member_context(member_id)
+        concepts = build_concept_catalog()
+        mkg = MemberKG(member, concepts)
+        agent = create_copilot_agent(mkg, llm)
+        assert agent is not None
+        return agent
+
+    @pytest.mark.asyncio
+    async def test_conversation_memory_persists_across_turns(self):
+        """
+        Two sequential turns in the same thread — the second response should
+        reflect the context established in the first turn (R2 conversation memory).
+
+        Uses the MemorySaver checkpointer keyed by thread_id=member_id.
+        """
+        agent = self._build_agent_for_member(JORDAN_ID)
+        thread_cfg = {"configurable": {"thread_id": f"test_memory_{JORDAN_ID}"}}
+
+        # Turn 1: ask about adherence
+        result1 = await agent.ainvoke(
+            {"messages": [("human", f"What is Jordan's ({JORDAN_ID}) adherence trend?")]},
+            config=thread_cfg,
+        )
+        msgs1 = result1.get("messages", [])
+        assert len(msgs1) > 0
+
+        # Turn 2: follow-up that relies on Turn 1 context
+        result2 = await agent.ainvoke(
+            {"messages": [("human", "What does that trend suggest about churn risk?")]},
+            config=thread_cfg,
+        )
+        msgs2 = result2.get("messages", [])
+        # The thread should have more messages than Turn 1 alone (accumulated)
+        assert len(msgs2) > len(msgs1), (
+            "Thread should accumulate messages across turns (conversation memory)"
+        )
+
+        # Final response should be non-empty
+        final = msgs2[-1]
+        response_text = (
+            final.content if isinstance(final.content, str)
+            else " ".join(
+                b.get("text", "") if isinstance(b, dict) else b
+                for b in final.content
+            )
+        )
+        assert len(response_text) > 0
+
+    @pytest.mark.asyncio
+    async def test_lab_results_tool_invoked(self):
+        """
+        When asked about labs, the agent should call lab_results tool and
+        return data grounded in the KG — not invented.
+        """
+        agent = self._build_agent_for_member(JORDAN_ID)
+        thread_cfg = {"configurable": {"thread_id": f"test_labs_{JORDAN_ID}"}}
+
+        result = await agent.ainvoke(
+            {"messages": [("human", f"What are {JORDAN_ID}'s latest lab results?")]},
+            config=thread_cfg,
+        )
+        messages = result.get("messages", [])
+
+        # Verify a tool was called
+        tool_calls_made = []
+        for m in messages:
+            if hasattr(m, "tool_calls") and m.tool_calls:
+                for tc in m.tool_calls:
+                    name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", "")
+                    tool_calls_made.append(name)
+
+        assert "lab_results" in tool_calls_made or len([
+            m for m in messages if "ToolMessage" in type(m).__name__
+        ]) > 0, (
+            f"Expected agent to call 'lab_results'. Calls: {tool_calls_made}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_anti_fabrication_unknown_member(self):
+        """
+        Anti-fabrication: when asked about an unknown member, the agent should
+        surface the error from the tool (member not found) — not invent data.
+        """
+        agent = self._build_agent_for_member(JORDAN_ID)
+        thread_cfg = {"configurable": {"thread_id": "test_antifab_unknown"}}
+
+        result = await agent.ainvoke(
+            {
+                "messages": [
+                    (
+                        "human",
+                        "What is the adherence for member mbr_DOES_NOT_EXIST_12345?",
+                    )
+                ]
+            },
+            config=thread_cfg,
+        )
+        messages = result.get("messages", [])
+        final = messages[-1]
+        response_text = (
+            final.content if isinstance(final.content, str)
+            else " ".join(
+                b.get("text", "") if isinstance(b, dict) else b
+                for b in final.content
+                if isinstance(b, (str, dict))
+            )
+        )
+        # The response should acknowledge the error, not fabricate member data
+        assert len(response_text) > 0
+        # Should mention not found / error — not invent adherence numbers
+        lower = response_text.lower()
+        assert any(kw in lower for kw in ("not found", "error", "unable", "cannot", "don't have")), (
+            f"Expected agent to surface an error for unknown member. Got: {response_text[:300]}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 5. Copilot API endpoint smoke tests
 # ---------------------------------------------------------------------------
 
 
 class TestCopilotEndpoint:
-    """API-level tests for POST /api/copilot/chat."""
+    """API-level tests for POST /api/copilot/chat and GET /chat-history."""
 
     def test_chat_returns_503_without_api_key(self, monkeypatch):
         """Without ANTHROPIC_API_KEY the /chat endpoint returns 503."""
@@ -663,3 +1073,99 @@ class TestCopilotEndpoint:
             json={"message": "How's adherence?", "member_id": JORDAN_ID},
         )
         assert response.status_code == 503
+
+    def test_chat_history_endpoint_jordan(self):
+        """GET /api/copilot/members/jordan/chat-history returns Jordan's messages."""
+        from fastapi.testclient import TestClient
+        from app.main import app
+
+        client = TestClient(app)
+        response = client.get(f"/api/copilot/members/{JORDAN_ID}/chat-history")
+        assert response.status_code == 200
+        data = response.json()
+        assert isinstance(data, list)
+        assert len(data) > 0
+        # Each message should have expected keys
+        for msg in data:
+            assert "ts" in msg
+            assert "from" in msg
+            assert "text" in msg
+            assert "attachments" in msg
+            assert msg["from"] in ("member", "coach")
+
+    def test_chat_history_endpoint_mico(self):
+        """GET /api/copilot/members/mico/chat-history returns Mico's messages."""
+        from fastapi.testclient import TestClient
+        from app.main import app
+
+        client = TestClient(app)
+        response = client.get(f"/api/copilot/members/{MICO_ID}/chat-history")
+        assert response.status_code == 200
+        data = response.json()
+        assert isinstance(data, list)
+        assert len(data) > 0
+
+    def test_chat_history_endpoint_unknown_member_returns_404(self):
+        """GET /api/copilot/members/unknown/chat-history returns 404."""
+        from fastapi.testclient import TestClient
+        from app.main import app
+
+        client = TestClient(app)
+        response = client.get("/api/copilot/members/mbr_DOES_NOT_EXIST/chat-history")
+        assert response.status_code == 404
+
+    def test_chat_history_jordan_has_image_attachment(self):
+        """Jordan's chat history includes at least one message with an attachment."""
+        from fastapi.testclient import TestClient
+        from app.main import app
+
+        client = TestClient(app)
+        response = client.get(f"/api/copilot/members/{JORDAN_ID}/chat-history")
+        assert response.status_code == 200
+        data = response.json()
+        msgs_with_attachments = [m for m in data if m.get("attachments")]
+        assert len(msgs_with_attachments) > 0, (
+            "Jordan's chat history should include at least one message with an attachment"
+        )
+
+    def test_chat_history_is_chronologically_ordered(self):
+        """Chat history is returned in chronological order (oldest first)."""
+        from fastapi.testclient import TestClient
+        from app.main import app
+
+        client = TestClient(app)
+        response = client.get(f"/api/copilot/members/{JORDAN_ID}/chat-history")
+        assert response.status_code == 200
+        data = response.json()
+        if len(data) > 1:
+            timestamps = [m["ts"] for m in data]
+            assert timestamps == sorted(timestamps), (
+                "Chat history should be in chronological order"
+            )
+
+    def test_copilot_request_accepts_attachments(self, monkeypatch):
+        """
+        CopilotRequest schema accepts an 'attachments' field (multimodal support).
+        Validates the schema without invoking the LLM.
+        """
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+        from fastapi.testclient import TestClient
+        from app.main import app
+
+        client = TestClient(app)
+        # POST with attachments field — should get 503 (no key) not 422 (schema error)
+        response = client.post(
+            "/api/copilot/chat",
+            json={
+                "message": "What is Jordan's body composition?",
+                "member_id": JORDAN_ID,
+                "attachments": [
+                    {"type": "image/jpeg", "caption": "Progress photo", "url": None}
+                ],
+            },
+        )
+        # 503 means the schema was accepted (LLM key missing), not 422 (schema error)
+        assert response.status_code == 503, (
+            f"Expected 503 (no API key) not 422 (schema rejection). Got: {response.status_code}"
+        )

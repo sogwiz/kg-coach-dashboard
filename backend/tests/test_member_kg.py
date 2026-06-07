@@ -1,5 +1,5 @@
 """
-Phase 7 validation: Member Context KG
+Phase 7 + 7.1 validation: Member Context KG
 
 Tests:
   1. Member KG loads for Jordan — graph has nodes + edges, injuries resolve
@@ -10,6 +10,10 @@ Tests:
      get_coach_brief, get_biomarkers all return plausible data.
   4. Multi-member independence: Jordan and Mico have separate MemberKG
      instances with distinct data.
+  5. Phase 7.1 new getters: get_goals, get_preferences, get_lab_results,
+     get_workout_history, get_chat_history — for both Jordan and Mico.
+  6. Phase 7.1 KG node checks: goal, workout_session, chat_message nodes
+     are present in the graph with correct edge relations.
 
 All tests are deterministic — no LLM or API key required.
 """
@@ -310,3 +314,268 @@ class TestMultiMemberIndependence:
         assert jordan_kg.graph.has_node("lumbar_spine")
         assert mico_kg.graph.has_node("knee")
         assert mico_kg.graph.has_node("lumbar_spine")
+
+
+# ---------------------------------------------------------------------------
+# 5. Phase 7.1 — new getters: get_goals, get_preferences, get_lab_results,
+#    get_workout_history, get_chat_history — Jordan
+# ---------------------------------------------------------------------------
+
+
+class TestPhase71GettersJordan:
+    """Tests for Phase 7.1 new getters — Jordan Rivera."""
+
+    def test_get_goals_returns_list(self, jordan_kg):
+        """get_goals returns a non-empty list of Goal objects."""
+        from app.models.member import Goal
+        goals = jordan_kg.get_goals()
+        assert isinstance(goals, list)
+        assert len(goals) > 0
+        for g in goals:
+            assert isinstance(g, Goal)
+            assert isinstance(g.text, str) and len(g.text) > 0
+            assert isinstance(g.priority, int)
+
+    def test_get_goals_jordan_has_knee_goal(self, jordan_kg):
+        """Jordan has a goal related to knee / squatting."""
+        goals = jordan_kg.get_goals()
+        texts_combined = " ".join(g.text.lower() for g in goals)
+        assert "knee" in texts_combined or "squat" in texts_combined, (
+            f"Jordan should have a knee/squat goal. Goals: {[g.text for g in goals]}"
+        )
+
+    def test_get_preferences_returns_preferences(self, jordan_kg):
+        """get_preferences returns a Preferences object with expected fields."""
+        from app.models.member import Preferences
+        prefs = jordan_kg.get_preferences()
+        assert isinstance(prefs, Preferences)
+        assert isinstance(prefs.preferred_session_minutes, int)
+        assert prefs.preferred_session_minutes > 0
+        assert isinstance(prefs.training_days_per_week, int)
+        assert isinstance(prefs.dislikes, list)
+
+    def test_get_preferences_jordan_has_dislikes(self, jordan_kg):
+        """Jordan's preferences include at least one disliked exercise."""
+        prefs = jordan_kg.get_preferences()
+        assert len(prefs.dislikes) > 0, "Jordan should have at least one dislike"
+
+    def test_get_lab_results_returns_labs(self, jordan_kg):
+        """get_lab_results returns a Labs object."""
+        from app.models.member import Labs
+        labs = jordan_kg.get_lab_results()
+        assert isinstance(labs, Labs)
+
+    def test_get_lab_results_jordan_has_blood_panel(self, jordan_kg):
+        """Jordan has a blood panel with expected fields."""
+        labs = jordan_kg.get_lab_results()
+        assert labs.blood_panel is not None, "Jordan should have a blood panel"
+        bp = labs.blood_panel
+        assert isinstance(bp.ldl_mg_dl, float)
+        assert isinstance(bp.hdl_mg_dl, float)
+        assert isinstance(bp.date, str)
+
+    def test_get_lab_results_jordan_has_dexa(self, jordan_kg):
+        """Jordan has a DEXA scan."""
+        labs = jordan_kg.get_lab_results()
+        assert labs.dexa_scan is not None, "Jordan should have a DEXA scan"
+        assert isinstance(labs.dexa_scan.body_fat_pct, float)
+        assert isinstance(labs.dexa_scan.lean_mass_kg, float)
+
+    def test_get_workout_history_returns_sessions(self, jordan_kg):
+        """get_workout_history returns a list of WorkoutSession objects."""
+        from app.models.member import WorkoutSession
+        history = jordan_kg.get_workout_history()
+        assert isinstance(history, list)
+        assert len(history) > 0
+        for s in history:
+            assert isinstance(s, WorkoutSession)
+            assert isinstance(s.date, str)
+            assert isinstance(s.title, str)
+
+    def test_get_workout_history_includes_completed_sessions(self, jordan_kg):
+        """At least some of Jordan's sessions are marked completed."""
+        history = jordan_kg.get_workout_history()
+        completed = [s for s in history if s.completed]
+        assert len(completed) > 0, "Jordan should have at least one completed session"
+
+    def test_get_chat_history_returns_messages(self, jordan_kg):
+        """get_chat_history returns a list of ChatMessage objects."""
+        from app.models.member import ChatMessage
+        messages = jordan_kg.get_chat_history()
+        assert isinstance(messages, list)
+        assert len(messages) > 0
+        for m in messages:
+            assert isinstance(m, ChatMessage)
+            assert m.from_ in ("member", "coach")
+            assert isinstance(m.text, str)
+
+    def test_get_chat_history_jordan_has_image_attachment(self, jordan_kg):
+        """Jordan's chat history includes at least one message with an image attachment."""
+        messages = jordan_kg.get_chat_history()
+        msgs_with_attachments = [m for m in messages if m.attachments]
+        assert len(msgs_with_attachments) > 0, (
+            "Jordan should have at least one chat message with an attachment"
+        )
+
+    def test_get_biomarkers_jordan_rhr_hrv_sleep(self, jordan_kg):
+        """get_biomarkers returns RHR, HRV, and sleep data for Jordan."""
+        biomarkers = jordan_kg.get_biomarkers()
+        assert isinstance(biomarkers.resting_hr_bpm, float)
+        assert isinstance(biomarkers.hrv_ms, float)
+        assert len(biomarkers.sleep_hours_last_7_days) > 0
+        # Values should be physiologically plausible
+        assert 30 <= biomarkers.resting_hr_bpm <= 100
+        assert biomarkers.hrv_ms > 0
+
+
+# ---------------------------------------------------------------------------
+# 6. Phase 7.1 — new getters: get_goals, get_preferences, get_lab_results,
+#    get_workout_history, get_chat_history — Mico
+# ---------------------------------------------------------------------------
+
+
+class TestPhase71GettersMico:
+    """Tests for Phase 7.1 new getters — Mico."""
+
+    def test_get_goals_mico_has_hormone_goal(self, mico_kg):
+        """Mico has at least one hormone/longevity/HYROX goal."""
+        goals = mico_kg.get_goals()
+        assert len(goals) > 0
+        texts_combined = " ".join(g.text.lower() for g in goals)
+        assert any(kw in texts_combined for kw in ("hormone", "testosterone", "hyrox", "longevity", "lumbar", "back")), (
+            f"Mico should have a hormone/HYROX/lumbar goal. Goals: {[g.text for g in goals]}"
+        )
+
+    def test_get_preferences_mico_session_minutes(self, mico_kg):
+        """Mico prefers 60-minute sessions."""
+        prefs = mico_kg.get_preferences()
+        assert prefs.preferred_session_minutes == 60
+
+    def test_get_lab_results_mico_has_hormone_panel(self, mico_kg):
+        """Mico's blood panel includes testosterone and cortisol."""
+        labs = mico_kg.get_lab_results()
+        assert labs.blood_panel is not None
+        bp = labs.blood_panel
+        assert bp.testosterone_ng_dl is not None, "Mico should have testosterone data"
+        assert bp.cortisol_morning_mcg_dl is not None, "Mico should have cortisol data"
+
+    def test_get_lab_results_mico_has_dexa(self, mico_kg):
+        """Mico has a DEXA scan with lower body fat than Jordan."""
+        labs = mico_kg.get_lab_results()
+        assert labs.dexa_scan is not None
+        assert labs.dexa_scan.body_fat_pct is not None
+        # Mico is a trained male — body fat should be < 25%
+        assert labs.dexa_scan.body_fat_pct < 25, (
+            f"Mico's body fat should be < 25%, got {labs.dexa_scan.body_fat_pct}"
+        )
+
+    def test_get_workout_history_mico_recent_sessions(self, mico_kg):
+        """Mico's workout history has recent completed sessions."""
+        history = mico_kg.get_workout_history()
+        assert len(history) > 0
+        completed = [s for s in history if s.completed]
+        assert len(completed) > 0
+
+    def test_get_chat_history_mico_has_messages(self, mico_kg):
+        """Mico has coach and member messages in chat history."""
+        messages = mico_kg.get_chat_history()
+        assert len(messages) > 0
+        senders = {m.from_ for m in messages}
+        assert "member" in senders
+        assert "coach" in senders
+
+    def test_get_biomarkers_mico_rhr_hrv(self, mico_kg):
+        """Mico's biomarkers include RHR and HRV — values consistent with fit athlete."""
+        biomarkers = mico_kg.get_biomarkers()
+        assert isinstance(biomarkers.resting_hr_bpm, float)
+        assert isinstance(biomarkers.hrv_ms, float)
+        # Mico is a fit former gymnast — expect lower RHR and higher HRV than Jordan
+        assert biomarkers.resting_hr_bpm < 60, (
+            f"Mico's RHR should be < 60 for a fit athlete, got {biomarkers.resting_hr_bpm}"
+        )
+        assert biomarkers.hrv_ms > 50, (
+            f"Mico's HRV should be > 50 ms for a fit athlete, got {biomarkers.hrv_ms}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# 7. Phase 7.1 — KG graph node checks
+# ---------------------------------------------------------------------------
+
+
+class TestPhase71KGNodes:
+    """Verify that Phase 7.1 node types are present in the graph."""
+
+    def test_jordan_goal_nodes_in_graph(self, jordan_kg):
+        """Jordan's goals should appear as 'goal' nodes in the KG graph."""
+        g = jordan_kg.graph
+        goal_nodes = [
+            n for n, d in g.nodes(data=True)
+            if d.get("node_type") == "goal"
+        ]
+        assert len(goal_nodes) > 0, (
+            "Expected goal nodes in Jordan's MemberKG graph"
+        )
+
+    def test_jordan_goal_nodes_linked_to_member(self, jordan_kg):
+        """Jordan's goal nodes must be linked from the member node via has_goal edges."""
+        g = jordan_kg.graph
+        member_id = jordan_kg.get_member_id()
+        has_goal_targets = [
+            t for _, t, d in g.out_edges(member_id, data=True)
+            if d.get("relation") == "has_goal"
+        ]
+        assert len(has_goal_targets) > 0, (
+            "Member node should have has_goal edges"
+        )
+
+    def test_jordan_workout_session_nodes_in_graph(self, jordan_kg):
+        """Jordan's workout sessions should appear as 'workout_session' nodes."""
+        g = jordan_kg.graph
+        session_nodes = [
+            n for n, d in g.nodes(data=True)
+            if d.get("node_type") == "workout_session"
+        ]
+        assert len(session_nodes) > 0, (
+            "Expected workout_session nodes in Jordan's MemberKG graph"
+        )
+
+    def test_jordan_chat_message_nodes_in_graph(self, jordan_kg):
+        """Jordan's chat messages should appear as 'chat_message' nodes."""
+        g = jordan_kg.graph
+        chat_nodes = [
+            n for n, d in g.nodes(data=True)
+            if d.get("node_type") == "chat_message"
+        ]
+        assert len(chat_nodes) > 0, (
+            "Expected chat_message nodes in Jordan's MemberKG graph"
+        )
+
+    def test_mico_goal_nodes_in_graph(self, mico_kg):
+        """Mico's goals should appear as 'goal' nodes in the KG graph."""
+        g = mico_kg.graph
+        goal_nodes = [
+            n for n, d in g.nodes(data=True)
+            if d.get("node_type") == "goal"
+        ]
+        assert len(goal_nodes) > 0
+
+    def test_mico_chat_message_nodes_in_graph(self, mico_kg):
+        """Mico's chat messages should appear as 'chat_message' nodes."""
+        g = mico_kg.graph
+        chat_nodes = [
+            n for n, d in g.nodes(data=True)
+            if d.get("node_type") == "chat_message"
+        ]
+        assert len(chat_nodes) > 0
+
+    def test_chat_message_node_has_from_attribute(self, jordan_kg):
+        """Chat message nodes have from_ attribute."""
+        g = jordan_kg.graph
+        chat_nodes = [
+            (n, d) for n, d in g.nodes(data=True)
+            if d.get("node_type") == "chat_message"
+        ]
+        for _, data in chat_nodes:
+            assert "from_" in data, "chat_message node should have 'from_' attribute"
+            assert data["from_"] in ("member", "coach")

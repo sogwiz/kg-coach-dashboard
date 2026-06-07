@@ -4,10 +4,11 @@ Movement Knowledge Graph (MovementKG)
 Builds a networkx.MultiDiGraph that wires exercises to ontology concept nodes
 via typed edges:
 
-  Exercise --stresses-->  Joint     (the joint is loaded under stress)
-  Exercise --targets-->   Muscle    (primary/secondary muscle groups)
-  Exercise --requires-->  Equipment (physical gear needed)
-  Exercise --uses-->      Pattern   (movement pattern category)
+  Exercise  --stresses-->          Joint     (the joint is loaded under stress)
+  Exercise  --targets-->           Muscle    (primary/secondary muscle groups)
+  Exercise  --requires-->          Equipment (physical gear needed)
+  Exercise  --uses-->              Pattern   (movement pattern category)
+  InjuryConcept --contraindicated-for--> Exercise  (static textbook view)
 
 Edges also carry movement-type annotations on exercise→joint edges, enabling
 the dynamic safety filter to exclude exercises by specific movement type
@@ -17,11 +18,26 @@ The graph shares concept nodes with the SNOMED anatomy graph: joint node ids
 in MovementKG correspond to SNOMED concept codes where applicable, so
 part-of traversal from the SNOMED loader maps directly to graph nodes.
 
+Phase 7.1 addition (R3 KG1 gap-closing):
+  Materialize static ``contraindicated-for`` edges from a small built-in table
+  of injury–concept → excluded movement-types rules.  These are the static
+  "textbook" contraindications (not state-aware); the dynamic
+  conditional_safety_filter remains the runtime authority for today's injury.
+  The edges power the Graph Explorer (Phase 10) and satisfy the literal KG1
+  edge-type spec.
+
 Usage:
     kg = MovementKG(exercises, catalog, snomed)
-    joint_set = kg.descendants_by_part_of("knee")   # e.g. {"knee", "patellofemoral_joint", ...}
-    excluded  = kg.exercises_stressing(joint_set)    # set of exercise ids
+    joint_set  = kg.descendants_by_part_of("knee")
+    excluded   = kg.exercises_stressing(joint_set)
     flexion_ex = kg.exercises_by_movement_type("knee", "flexion")
+
+    # Contraindicated-for (static textbook view)
+    contra = kg.contraindicated_exercises("knee")
+    # → {exercise_id, ...}  — exercises with static knee contra edges
+
+    edges = kg.list_contraindicated_for_edges()
+    # → [{injury_concept, exercise_id, exercise_name, movement_types}, ...]
 """
 
 from __future__ import annotations
@@ -39,12 +55,33 @@ from app.ontology.loader import SnomedConcept, get_descendants_by_part_of
 # Edge type constants (used as the 'relation' attribute on MultiDiGraph edges)
 # ---------------------------------------------------------------------------
 
-EDGE_STRESSES = "stresses"    # Exercise → Joint
-EDGE_TARGETS = "targets"      # Exercise → Muscle
-EDGE_REQUIRES = "requires"    # Exercise → Equipment
-EDGE_USES = "uses"            # Exercise → Pattern
-EDGE_PART_OF = "part-of"      # Joint/region → parent region (from SNOMED)
-EDGE_INVOLVES = "involves"    # Injury → Joint/region (from SNOMED)
+EDGE_STRESSES = "stresses"              # Exercise → Joint
+EDGE_TARGETS = "targets"               # Exercise → Muscle
+EDGE_REQUIRES = "requires"             # Exercise → Equipment
+EDGE_USES = "uses"                     # Exercise → Pattern
+EDGE_PART_OF = "part-of"               # Joint/region → parent region (from SNOMED)
+EDGE_INVOLVES = "involves"             # Injury → Joint/region (from SNOMED)
+EDGE_CONTRAINDICATED_FOR = "contraindicated-for"  # InjuryConcept → Exercise (static textbook)
+
+
+# ---------------------------------------------------------------------------
+# Static textbook contraindication rules (R3 KG1 gap-closing)
+#
+# Maps an injury joint slug → list of movement-types that are baseline
+# contraindicated for that injury, based on standard rehab/clinical guidelines.
+# The dynamic conditional_safety_filter overrides these at runtime using the
+# member's actual injury state (pain_on, inflammation, phase).
+#
+# Format: injury_joint_slug → set of contraindicated movement types
+# ---------------------------------------------------------------------------
+
+_STATIC_CONTRAINDICATION_RULES: dict[str, set[str]] = {
+    "knee": {"flexion", "impact", "load"},
+    "lumbar_spine": {"flexion", "load", "rotation"},
+    "shoulder": {"flexion", "rotation", "load"},
+    "hip": {"flexion", "load"},
+    "ankle": {"impact", "load"},
+}
 
 
 class MovementKG:
@@ -137,6 +174,9 @@ class MovementKG:
             )
             self._wire_exercise(ex, concepts)
 
+        # 4. Materialize static contraindicated-for edges (R3 KG1 gap-closing)
+        self._build_contraindicated_for_edges(exercises, concepts)
+
     def _wire_exercise(self, ex: Exercise, concepts: dict[str, Concept]) -> None:
         """Add stresses/targets/requires/uses edges for one exercise."""
 
@@ -176,6 +216,84 @@ class MovementKG:
             pattern_id = self._resolve_label(pattern_str, pattern_slug_map)
             if pattern_id:
                 self._g.add_edge(ex.id, pattern_id, relation=EDGE_USES)
+
+    def _build_contraindicated_for_edges(
+        self,
+        exercises: list[Exercise],
+        concepts: dict[str, Concept],
+    ) -> None:
+        """
+        Materialize static ``contraindicated-for`` edges from the baseline
+        clinical rules table (_STATIC_CONTRAINDICATION_RULES).
+
+        For each injury joint slug in the rules table:
+          1. Add an injury-concept node (node_type="injury_concept") if absent.
+          2. For each exercise that involves that joint with a contraindicated
+             movement type, add edge:
+               injury_concept_node --contraindicated-for--> exercise_node
+             The edge carries ``movement_types`` (which types triggered it).
+
+        Two sources are checked for an exercise's involvement with a joint:
+          a. Graph stresses edges (joints in exercise.joints_loaded) — the
+             primary source used by the safety filter.
+          b. The exercise.joint_movements annotation dict — covers joints
+             that appear in annotations but were omitted from joints_loaded
+             (e.g. lumbar_spine annotations on exercises whose joints_loaded
+             lists only the primary joint).  This ensures the static contra
+             edges are complete even when joints_loaded is not exhaustive.
+
+        These are static "textbook" edges — the runtime authority is always
+        the conditional_safety_filter with today's injury state.
+        """
+        for joint_slug, contra_movement_types in _STATIC_CONTRAINDICATION_RULES.items():
+            # Ensure the injury-concept node exists
+            inj_concept_id = f"injury_concept_{joint_slug}"
+            if not self._g.has_node(inj_concept_id):
+                label = f"{joint_slug.replace('_', ' ')} injury"
+                self._g.add_node(
+                    inj_concept_id,
+                    node_type="injury_concept",
+                    pref_label=label,
+                    joint_slug=joint_slug,
+                )
+
+            # Collect all node ids for this joint (slug + SNOMED descendants)
+            joint_node_ids = self.descendants_by_part_of(joint_slug)
+
+            # Walk every exercise: find ones that involve this joint with a
+            # movement type that appears in the contraindication rule.
+            for ex in exercises:
+                if not self._g.has_node(ex.id):
+                    continue
+                triggered_types: set[str] = set()
+
+                # Source (a): check graph stresses edges
+                for _, target, data in self._g.out_edges(ex.id, data=True):
+                    if data.get("relation") != EDGE_STRESSES:
+                        continue
+                    if target not in joint_node_ids:
+                        continue
+                    ex_movement_types = set(data.get("movement_types", []))
+                    matched = ex_movement_types & contra_movement_types
+                    if matched:
+                        triggered_types |= matched
+
+                # Source (b): check joint_movements annotation directly
+                # (covers joints listed in annotations but not in joints_loaded)
+                for annotated_joint, movement_type_list in ex.joint_movements.items():
+                    # Match by joint slug directly
+                    if annotated_joint == joint_slug:
+                        matched = set(movement_type_list) & contra_movement_types
+                        if matched:
+                            triggered_types |= matched
+
+                if triggered_types:
+                    self._g.add_edge(
+                        inj_concept_id,
+                        ex.id,
+                        relation=EDGE_CONTRAINDICATED_FOR,
+                        movement_types=sorted(triggered_types),
+                    )
 
     # ------------------------------------------------------------------
     # Query API
@@ -272,6 +390,67 @@ class MovementKG:
                     result.add(ex_id)
                     break
         return result
+
+    def contraindicated_exercises(self, injury_joint_slug: str) -> set[str]:
+        """
+        Return the set of exercise ids that are statically contraindicated for
+        the given injury joint slug (e.g. "knee", "lumbar_spine").
+
+        These edges are the static "textbook" view materialised at graph-build
+        time from _STATIC_CONTRAINDICATION_RULES.  The runtime authority for
+        a specific member's injury state is the conditional_safety_filter.
+
+        Parameters
+        ----------
+        injury_joint_slug:
+            The joint concept id (e.g. "knee", "lumbar_spine").
+
+        Returns
+        -------
+        set[str]
+            Exercise ids with a ``contraindicated-for`` edge from the given
+            injury concept node.  Empty set if no rules exist for the slug.
+        """
+        inj_concept_id = f"injury_concept_{injury_joint_slug}"
+        if not self._g.has_node(inj_concept_id):
+            return set()
+        result: set[str] = set()
+        for _, target, data in self._g.out_edges(inj_concept_id, data=True):
+            if data.get("relation") == EDGE_CONTRAINDICATED_FOR:
+                result.add(target)
+        return result
+
+    def list_contraindicated_for_edges(self) -> list[dict]:
+        """
+        Return all static ``contraindicated-for`` edges as a list of dicts.
+
+        Each dict has:
+          - injury_concept:  the injury concept node id (e.g. "injury_concept_knee")
+          - joint_slug:      the joint slug (e.g. "knee")
+          - exercise_id:     the exercise node id
+          - exercise_name:   the exercise's human-readable name
+          - movement_types:  list of movement types that triggered the edge
+
+        Intended for the /api/graph endpoint (Phase 10 Graph Explorer) to
+        render the static contraindication graph alongside the dynamic safety
+        filter result.
+        """
+        edges: list[dict] = []
+        for source, target, data in self._g.edges(data=True):
+            if data.get("relation") != EDGE_CONTRAINDICATED_FOR:
+                continue
+            source_data = self._g.nodes.get(source, {})
+            ex = self._exercises.get(target)
+            if ex is None:
+                continue
+            edges.append({
+                "injury_concept": source,
+                "joint_slug": source_data.get("joint_slug", ""),
+                "exercise_id": target,
+                "exercise_name": ex.name,
+                "movement_types": data.get("movement_types", []),
+            })
+        return edges
 
     def get_exercise(self, exercise_id: str) -> Exercise | None:
         """Return the Exercise model for the given id, or None."""
