@@ -242,8 +242,23 @@ def _serialise_output(output: GeneratorOutput) -> dict:
         ],
     }
 
+    # Serialise the in-app decision trace (Phase 7 observability)
+    decision_trace_list: list[dict] = []
+    if output.decision_trace:
+        for step in output.decision_trace:
+            decision_trace_list.append(
+                {
+                    "name": step.name,
+                    "detail": step.detail,
+                    "inputs": step.inputs,
+                    "outputs": step.outputs,
+                    "kind": step.kind,
+                }
+            )
+
     return {
         "variants": [_serialise_variant(v) for v in output.variants],
         "trace_summary": trace_summary,
         "selected_variant_id": output.selected_variant_id,
+        "decision_trace": decision_trace_list,
     }

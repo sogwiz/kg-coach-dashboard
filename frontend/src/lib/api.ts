@@ -127,6 +127,86 @@ export interface MemberContext {
 }
 
 // ---------------------------------------------------------------------------
+// Generator types (mirrors backend generator route _serialise_output shape)
+// ---------------------------------------------------------------------------
+
+export type SequencingRole =
+  | "activation"
+  | "primer"
+  | "compound"
+  | "accessory"
+  | "conditioning"
+  | "cooldown";
+
+export interface PlannedExercise {
+  exercise_id: string;
+  name: string;
+  order: number;
+  sets: number;
+  reps: number | null;
+  duration_seconds: number | null;
+  rest_seconds: number;
+  rationale: string;
+  sequencing_rationale: string;
+  sequencing_role: SequencingRole;
+}
+
+export interface WorkoutPlan {
+  warmup: PlannedExercise[];
+  main: PlannedExercise[];
+  cooldown: PlannedExercise[];
+  total_minutes: number;
+  stimulus: string;
+  target_adaptation: string;
+  design_rationale: string;
+  sequence_logic: string;
+}
+
+export interface VariantProvenance {
+  generated_at: string;
+  prompt: string;
+  time_window_minutes: number;
+  healing_phase: string | null;
+  load_tolerance_pct: number;
+  stale_check_in: boolean;
+  exercises_filtered_out: Array<{ name: string; id: string; reason: string }>;
+  equipment_available: string[];
+  injury_state_used: InjuryState | null;
+}
+
+export interface WorkoutVariant {
+  variant_id: string;   // "strength" | "conditioning" | "mobility"
+  label: string;
+  optimizes_for: string;
+  plan: WorkoutPlan;
+  provenance: VariantProvenance;
+}
+
+export interface TraceSummary {
+  safe_count: number;
+  removed_count: number;
+  substitution_count: number;
+  load_tolerance_pct: number;
+  stale_check_in: boolean;
+  removed: Array<{ id: string; name: string; reason: string }>;
+}
+
+export interface DecisionStep {
+  name: string;
+  detail: string;
+  inputs: Record<string, unknown>;
+  outputs: Record<string, unknown>;
+  kind: "deterministic" | "llm";
+}
+
+export interface GeneratorOutput {
+  variants: WorkoutVariant[];
+  trace_summary: TraceSummary;
+  selected_variant_id: string | null;
+  decision_trace: DecisionStep[];
+}
+
+// ---------------------------------------------------------------------------
 // Token helpers
 // ---------------------------------------------------------------------------
 
@@ -227,4 +307,33 @@ export async function postInjuryCheckIn(
       body: JSON.stringify(state),
     }
   );
+}
+
+// ---------------------------------------------------------------------------
+// Generator endpoints
+// ---------------------------------------------------------------------------
+
+export async function postGenerate(
+  prompt: string,
+  timeWindowMinutes: number,
+  memberId: string
+): Promise<GeneratorOutput> {
+  return apiFetch<GeneratorOutput>("/api/generate", {
+    method: "POST",
+    body: JSON.stringify({
+      prompt,
+      time_window_minutes: timeWindowMinutes,
+      member_id: memberId,
+    }),
+  });
+}
+
+export async function postGenerateSelect(
+  memberId: string,
+  variantId: string
+): Promise<GeneratorOutput> {
+  return apiFetch<GeneratorOutput>("/api/generate/select", {
+    method: "POST",
+    body: JSON.stringify({ member_id: memberId, variant_id: variantId }),
+  });
 }

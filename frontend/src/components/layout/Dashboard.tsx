@@ -3,10 +3,9 @@
  *
  * Structure:
  *   - Sidebar: coach profile / logout, member switcher
- *   - Main: tabs for member overview (this phase), generator, copilot (later)
+ *   - Main: tabs for member overview (Phase 8), generator (Phase 9), copilot (Phase 10)
  *
- * The layout is intentionally built to accept additional main-content
- * tabs/sections in Phases 9 and 10.
+ * The generator tab is keyed off the active member_id via useGenerator.
  */
 
 import { useState, useEffect } from "react";
@@ -14,6 +13,7 @@ import { useAuth } from "../../state/auth";
 import { useMembers } from "../../hooks/useMembers";
 import { useActiveMember } from "../../state/activeMember";
 import { useInjury } from "../../hooks/useInjury";
+import { useGenerator } from "../../hooks/useGenerator";
 import { fetchMember, type MemberContext } from "../../lib/api";
 import { MemberSwitcher } from "../member/MemberSwitcher";
 import { MemberHeader } from "../member/MemberHeader";
@@ -21,17 +21,23 @@ import { MorningBrief } from "../member/MorningBrief";
 import { InjuryStatusCard } from "../injury/InjuryStatusCard";
 import { InjuryTimeline } from "../injury/InjuryTimeline";
 import { CheckInModal } from "../injury/CheckInModal";
+import { GeneratorPanel } from "../generator/GeneratorPanel";
+import { VariantChooser } from "../generator/VariantChooser";
+import { InjuryWarning } from "../generator/InjuryWarning";
+import { ProvenanceTrace } from "../generator/ProvenanceTrace";
+import { DecisionTrace } from "../generator/DecisionTrace";
 
-type Tab = "overview";
+type Tab = "overview" | "generator";
 
 export function Dashboard() {
   const { coach, logout } = useAuth();
   const { activeMember } = useActiveMember();
   const { isLoading: membersLoading, error: membersError } = useMembers();
 
-  const [_activeTab] = useState<Tab>("overview");
+  const [activeTab, setActiveTab] = useState<Tab>("overview");
   const [memberCtx, setMemberCtx] = useState<MemberContext | null>(null);
   const [checkInOpen, setCheckInOpen] = useState(false);
+  const [isSelecting, setIsSelecting] = useState(false);
 
   // Load full member context when active member changes
   useEffect(() => {
@@ -61,12 +67,47 @@ export function Dashboard() {
     needsCheckIn,
   } = useInjury(activeMember?.member_id ?? null, injuryId);
 
+  // Generator state (keyed by active member)
+  const {
+    generate,
+    selectVariant,
+    variants,
+    selectedVariant,
+    traceSummary,
+    decisionTrace,
+    injuryStateUsed,
+    loading: genLoading,
+    error: genError,
+    llmUnconfigured,
+    reset: resetGenerator,
+  } = useGenerator(activeMember?.member_id ?? null);
+
+  // Reset generator output when switching members
+  useEffect(() => {
+    resetGenerator();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeMember?.member_id]);
+
+  const handleSelectVariant = async (variantId: string) => {
+    setIsSelecting(true);
+    try {
+      await selectVariant(variantId);
+    } finally {
+      setIsSelecting(false);
+    }
+  };
+
   // Most recent adherence %
   const adherenceWeeks = memberCtx?.adherence?.weekly_completion_pct ?? [];
   const lastAdherencePct =
     adherenceWeeks.length > 0
       ? adherenceWeeks[adherenceWeeks.length - 1].pct
       : null;
+
+  const TABS: { id: Tab; label: string }[] = [
+    { id: "overview", label: "Overview" },
+    { id: "generator", label: "Workout Generator" },
+  ];
 
   return (
     <div className="min-h-screen bg-slate-50 flex">
@@ -90,7 +131,7 @@ export function Dashboard() {
         {/* Member switcher */}
         <nav className="flex-1 overflow-y-auto px-3 py-4">
           {membersLoading ? (
-            <p className="text-xs text-slate-400 px-3">Loading members…</p>
+            <p className="text-xs text-slate-400 px-3">Loading members...</p>
           ) : membersError ? (
             <p className="text-xs text-red-500 px-3">{membersError}</p>
           ) : (
@@ -133,57 +174,169 @@ export function Dashboard() {
             <p className="text-slate-400 text-sm">Select a member to begin.</p>
           </div>
         ) : (
-          <div className="max-w-3xl mx-auto px-6 py-6 space-y-6">
+          <div className="max-w-4xl mx-auto px-6 py-6 space-y-6">
             {/* Member header */}
             <MemberHeader
               member={activeMember}
               adherencePct={lastAdherencePct}
             />
 
-            {/* Morning brief */}
-            {memberCtx && (
-              <MorningBrief
-                tasks={memberCtx.coach_brief.morning_tasks}
-                generatedFor={memberCtx.coach_brief.generated_for}
-              />
+            {/* Tab navigation */}
+            <div className="flex gap-1 border-b border-slate-200">
+              {TABS.map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`px-4 py-2.5 text-sm font-medium rounded-t-lg border-b-2 transition-colors ${
+                    activeTab === tab.id
+                      ? "border-indigo-600 text-indigo-600 bg-white"
+                      : "border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300"
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            {/* ---------------------------------------------------------- */}
+            {/* Overview tab                                                */}
+            {/* ---------------------------------------------------------- */}
+            {activeTab === "overview" && (
+              <div className="space-y-6">
+                {/* Morning brief */}
+                {memberCtx && (
+                  <MorningBrief
+                    tasks={memberCtx.coach_brief.morning_tasks}
+                    generatedFor={memberCtx.coach_brief.generated_for}
+                  />
+                )}
+
+                {/* Injury section */}
+                {injury ? (
+                  <div className="space-y-4">
+                    <h3 className="text-sm font-semibold text-slate-700">
+                      Injury Status
+                    </h3>
+
+                    <InjuryStatusCard
+                      injury={injury}
+                      currentState={currentState}
+                      needsCheckIn={needsCheckIn}
+                      onCheckIn={() => setCheckInOpen(true)}
+                    />
+
+                    <InjuryTimeline history={injuryHistory} />
+                  </div>
+                ) : firstInjury ? (
+                  <div className="bg-white rounded-xl border border-slate-200 p-4">
+                    <p className="text-sm text-slate-400">Loading injury data...</p>
+                  </div>
+                ) : null}
+
+                {/* Placeholder for Phase 10 copilot panel */}
+                <div className="bg-white rounded-xl border border-dashed border-slate-300 p-6 text-center">
+                  <p className="text-sm text-slate-400">
+                    Copilot panel — coming in Phase 10
+                  </p>
+                </div>
+              </div>
             )}
 
-            {/* Injury section */}
-            {injury ? (
-              <div className="space-y-4">
-                <h3 className="text-sm font-semibold text-slate-700">
-                  Injury Status
-                </h3>
+            {/* ---------------------------------------------------------- */}
+            {/* Generator tab                                               */}
+            {/* ---------------------------------------------------------- */}
+            {activeTab === "generator" && (
+              <div className="space-y-6">
+                {/* Generator input card */}
+                <div className="bg-white rounded-xl border border-slate-200 p-6 space-y-4">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-800">
+                      Generate workout
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Describe the session intent. The system applies the safety
+                      filter once and returns 3 labeled variants.
+                    </p>
+                  </div>
 
-                <InjuryStatusCard
-                  injury={injury}
-                  currentState={currentState}
-                  needsCheckIn={needsCheckIn}
-                  onCheckIn={() => setCheckInOpen(true)}
-                />
+                  {/* Injury warning (stale check-in) */}
+                  {injury && needsCheckIn && (
+                    <InjuryWarning
+                      lastCheckIn={currentState}
+                      staleCheckIn={needsCheckIn}
+                      onCheckIn={() => setCheckInOpen(true)}
+                    />
+                  )}
 
-                <InjuryTimeline history={injuryHistory} />
+                  {/* LLM unconfigured error */}
+                  {llmUnconfigured && (
+                    <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                      <strong>LLM not configured</strong> — Set{" "}
+                      <code className="text-xs bg-red-100 px-1 py-0.5 rounded">
+                        ANTHROPIC_API_KEY
+                      </code>{" "}
+                      and restart the server. The deterministic safety filter
+                      and decision trace still work without it.
+                    </div>
+                  )}
+
+                  {/* General error */}
+                  {genError && !llmUnconfigured && (
+                    <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                      {genError}
+                    </div>
+                  )}
+
+                  <GeneratorPanel
+                    onGenerate={generate}
+                    loading={genLoading}
+                    disabled={false}
+                  />
+                </div>
+
+                {/* Variant chooser — only shown when variants are available */}
+                {variants.length > 0 && (
+                  <div className="space-y-4">
+                    <h3 className="text-sm font-semibold text-slate-700">
+                      Choose a variant
+                    </h3>
+
+                    {/* Stale check-in warning at results level too */}
+                    {(traceSummary?.stale_check_in ||
+                      injuryStateUsed !== null &&
+                        variants[0]?.provenance?.stale_check_in) && (
+                      <InjuryWarning
+                        lastCheckIn={injuryStateUsed}
+                        staleCheckIn={true}
+                        onCheckIn={() => setCheckInOpen(true)}
+                      />
+                    )}
+
+                    <VariantChooser
+                      variants={variants}
+                      selectedVariant={selectedVariant}
+                      isSelecting={isSelecting}
+                      onSelect={handleSelectVariant}
+                    />
+
+                    {/* Safety filter provenance */}
+                    {traceSummary && (
+                      <ProvenanceTrace
+                        traceSummary={traceSummary}
+                        healingPhase={variants[0]?.provenance?.healing_phase}
+                        injuryRegion={injury?.region}
+                      />
+                    )}
+
+                    {/* Decision trace */}
+                    {decisionTrace.length > 0 && (
+                      <DecisionTrace steps={decisionTrace} />
+                    )}
+                  </div>
+                )}
               </div>
-            ) : firstInjury ? (
-              // Injury still loading
-              <div className="bg-white rounded-xl border border-slate-200 p-4">
-                <p className="text-sm text-slate-400">Loading injury data…</p>
-              </div>
-            ) : null}
-
-            {/* Placeholder for Phase 9 generator panel */}
-            <div className="bg-white rounded-xl border border-dashed border-slate-300 p-6 text-center">
-              <p className="text-sm text-slate-400">
-                Generator panel — coming in Phase 9
-              </p>
-            </div>
-
-            {/* Placeholder for Phase 10 copilot panel */}
-            <div className="bg-white rounded-xl border border-dashed border-slate-300 p-6 text-center">
-              <p className="text-sm text-slate-400">
-                Copilot panel — coming in Phase 10
-              </p>
-            </div>
+            )}
           </div>
         )}
       </main>
