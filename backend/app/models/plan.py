@@ -96,6 +96,21 @@ class PlannedExercise(BaseModel):
     )
 
 
+class StimulusDistribution(BaseModel):
+    """
+    How strongly the generated session leans toward each training stimulus.
+
+    Each value is an integer 0-100 representing the session's emphasis on that
+    modality. The three need not sum to 100 — they are independent "thermometer"
+    readings rendered as gauges in the UI so the coach can see at a glance how
+    the single generated workout is catered across stimuli.
+    """
+
+    strength: int = Field(default=0, ge=0, le=100, description="Strength & hypertrophy emphasis")
+    conditioning: int = Field(default=0, ge=0, le=100, description="Conditioning & metabolic emphasis")
+    mobility: int = Field(default=0, ge=0, le=100, description="Mobility & recovery emphasis")
+
+
 class WorkoutPlan(BaseModel):
     """
     A complete structured workout plan.
@@ -131,6 +146,14 @@ class WorkoutPlan(BaseModel):
     main: list[PlannedExercise] = Field(default_factory=list)
     cooldown: list[PlannedExercise] = Field(default_factory=list)
     total_minutes: int = Field(ge=1)
+    stimulus_distribution: StimulusDistribution = Field(
+        default_factory=StimulusDistribution,
+        description=(
+            "Independent 0-100 emphasis readings for strength / conditioning / "
+            "mobility, rendered as thermometer gauges so the coach sees how the "
+            "session is catered across stimuli."
+        ),
+    )
     stimulus: str = ""
     target_adaptation: str = ""
     design_rationale: str = ""

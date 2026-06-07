@@ -9,6 +9,7 @@
 
 import { AuthProvider, useAuth } from "./state/auth";
 import { ActiveMemberProvider } from "./state/activeMember";
+import { CopilotProvider } from "./state/copilot";
 import { LoginScreen } from "./components/auth/LoginScreen";
 import { Dashboard } from "./components/layout/Dashboard";
 
@@ -17,8 +18,8 @@ function AppInner() {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
-        <div className="text-slate-400 text-sm">Loading…</div>
+      <div className="min-h-screen bg-canvas flex items-center justify-center">
+        <div className="text-ink-faint text-sm tracking-wide">Loading…</div>
       </div>
     );
   }
@@ -29,7 +30,9 @@ function AppInner() {
 
   return (
     <ActiveMemberProvider>
-      <Dashboard />
+      <CopilotProvider>
+        <Dashboard />
+      </CopilotProvider>
     </ActiveMemberProvider>
   );
 }

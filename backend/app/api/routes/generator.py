@@ -37,13 +37,21 @@ clear error message — it never silently falls back to an incomplete plan.
 
 from __future__ import annotations
 
+import json
 from functools import lru_cache
+from typing import AsyncIterator
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.generator.pipeline import GeneratorInput, GeneratorOutput
 from app.generator.store import get_current_plan, select_variant, set_current_plan
+from app.generator.workout_send_store import (
+    get_sent_workout,
+    mark_workout_sent,
+    was_workout_sent_today,
+)
 
 router = APIRouter(prefix="/generate", tags=["generator"])
 
@@ -70,6 +78,9 @@ class GenerateRequest(BaseModel):
     prompt: str = Field(min_length=1, max_length=500)
     time_window_minutes: int = Field(default=60, ge=10, le=180)
     member_id: str = Field(default="mbr_01HX9JORDAN")
+    # "hybrid" (deterministic assembler + narrow LLM narration, fast — default)
+    # or "llm" (LLM structures the entire plan, richer/slower).
+    engine: str = Field(default="hybrid")
 
 
 class SelectRequest(BaseModel):
@@ -122,6 +133,61 @@ class RefineRequest(BaseModel):
     adjustment: str = Field(min_length=1, max_length=500)
     prompt: str | None = Field(default=None)
     time_window_minutes: int | None = Field(default=None, ge=10, le=180)
+
+
+class RegenerateRequest(BaseModel):
+    """
+    POST /api/generate/regenerate request body.
+
+    Re-runs the generator for the member's CURRENT plan, feeding the previously
+    generated session to the LLM so the new plan is a fresh, distinct variation
+    (not a from-scratch generation). Reuses the same prompt + time window as the
+    stored plan.
+
+    Attributes
+    ----------
+    member_id:
+        The member whose current plan should be regenerated.
+    adjustment:
+        Optional natural-language tweak, e.g. "more posterior chain",
+        "swap in kettlebells", "no barbell". Equipment/exercise exclusions are
+        parsed into the safety filter; the rest is passed to the LLM as intent.
+    """
+
+    member_id: str
+    adjustment: str | None = Field(default=None, max_length=500)
+
+
+class SendWorkoutRequest(BaseModel):
+    """
+    POST /api/generate/send request body.
+
+    Send the selected workout to a member with a friendly message.
+
+    Attributes
+    ----------
+    member_id:
+        The member to send the workout to.
+    variant_id:
+        The variant to send (strength/conditioning/mobility).
+    message:
+        The message to include with the workout. If not provided, a
+        pre-populated friendly message will be generated.
+    """
+
+    member_id: str
+    variant_id: str
+    message: str | None = None
+
+
+class SendWorkoutResponse(BaseModel):
+    """Response from POST /api/generate/send."""
+
+    success: bool
+    member_id: str
+    variant_id: str
+    message: str
+    sent_at: str
 
 
 # ---------------------------------------------------------------------------
@@ -201,6 +267,7 @@ async def generate(request: GenerateRequest) -> dict:
         prompt=request.prompt,
         time_window_minutes=request.time_window_minutes,
         member_id=request.member_id,
+        engine=request.engine,
     )
 
     from app.generator.pipeline import generate_workout
@@ -215,6 +282,66 @@ async def generate(request: GenerateRequest) -> dict:
     set_current_plan(request.member_id, output)
 
     return _serialise_output(output)
+
+
+@router.post("/stream", response_model=None)
+async def generate_stream(request: GenerateRequest) -> StreamingResponse:
+    """
+    Streaming generate. Emits newline-delimited JSON events so the coach sees
+    progress (resolve → safety result → structuring → plan) instead of a single
+    long wait. The final 'complete' event carries the same payload as /generate.
+
+    Event shapes (one JSON object per line):
+      {"type":"status","stage":"resolve"}
+      {"type":"status","stage":"safety","safe_count":N,"removed_count":M,"filter_ms":X}
+      {"type":"status","stage":"structuring"}
+      {"type":"complete","output": <same as POST /generate>}
+      {"type":"error","detail":"...","status":503}
+    """
+    llm = _get_llm()
+    if llm is None:
+        async def _err() -> AsyncIterator[str]:
+            yield json.dumps({
+                "type": "error",
+                "status": 503,
+                "detail": "ANTHROPIC_API_KEY is not configured.",
+            }) + "\n"
+        return StreamingResponse(_err(), media_type="application/x-ndjson")
+
+    kg = _get_kg()
+    from app.data.loader import load_member_context
+    try:
+        member = load_member_context(request.member_id)
+    except ValueError:
+        async def _err404() -> AsyncIterator[str]:
+            yield json.dumps({
+                "type": "error",
+                "status": 404,
+                "detail": f"Member '{request.member_id}' not found.",
+            }) + "\n"
+        return StreamingResponse(_err404(), media_type="application/x-ndjson")
+
+    gen_input = GeneratorInput(
+        prompt=request.prompt,
+        time_window_minutes=request.time_window_minutes,
+        member_id=request.member_id,
+        engine=request.engine,
+    )
+
+    from app.generator.pipeline import generate_workout_stream
+
+    async def _events() -> AsyncIterator[str]:
+        try:
+            async for item in generate_workout_stream(gen_input, kg, member, llm):
+                if isinstance(item, GeneratorOutput):
+                    set_current_plan(request.member_id, item)
+                    yield json.dumps({"type": "complete", "output": _serialise_output(item)}) + "\n"
+                else:
+                    yield json.dumps({"type": "status", **item}) + "\n"
+        except Exception as exc:  # pragma: no cover - defensive
+            yield json.dumps({"type": "error", "detail": str(exc)}) + "\n"
+
+    return StreamingResponse(_events(), media_type="application/x-ndjson")
 
 
 @router.post("/select", response_model=None)
@@ -239,6 +366,151 @@ async def select(request: SelectRequest) -> dict:
         )
 
     return _serialise_output(updated)
+
+
+@router.post("/send", response_model=SendWorkoutResponse)
+async def send_workout(request: SendWorkoutRequest) -> SendWorkoutResponse:
+    """
+    Send the selected workout variant to a member with a friendly message.
+
+    If no message is provided, generates a friendly 3-sentence message based
+    on the workout content.
+
+    Returns HTTP 404 if no plan has been generated for the member, or if the
+    variant_id is not valid.
+    """
+    stored = get_current_plan(request.member_id)
+    if stored is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No plan found for member '{request.member_id}'. Generate a plan first.",
+        )
+
+    variant = next(
+        (v for v in stored.variants if v.variant_id == request.variant_id),
+        None,
+    )
+    if variant is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Variant '{request.variant_id}' not found. Valid variants: strength, conditioning, mobility.",
+        )
+
+    # Load member for personalization
+    from app.data.loader import load_member_context
+    try:
+        member = load_member_context(request.member_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail=f"Member '{request.member_id}' not found.")
+
+    # Generate friendly message if not provided
+    message = request.message
+    if not message:
+        message = _generate_friendly_message(member.profile.name, variant)
+
+    # Record the send
+    record = mark_workout_sent(
+        member_id=request.member_id,
+        variant_id=request.variant_id,
+        message=message,
+    )
+
+    return SendWorkoutResponse(
+        success=True,
+        member_id=request.member_id,
+        variant_id=request.variant_id,
+        message=message,
+        sent_at=record.sent_at.isoformat(),
+    )
+
+
+@router.get("/send-status/{member_id}")
+async def get_send_status(member_id: str) -> dict:
+    """Check if a workout was sent to this member today."""
+    sent_today = was_workout_sent_today(member_id)
+    record = get_sent_workout(member_id)
+    return {
+        "member_id": member_id,
+        "sent_today": sent_today,
+        "last_sent": record.sent_at.isoformat() if record else None,
+        "last_message": record.message if record else None,
+    }
+
+
+@router.get("/preview-message")
+async def preview_message(member_id: str, variant_id: str) -> dict:
+    """
+    Generate a preview of the friendly message that would be sent with a workout.
+
+    Returns the pre-populated 3-sentence message without actually sending.
+    """
+    stored = get_current_plan(member_id)
+    if stored is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No plan found for member '{member_id}'. Generate a plan first.",
+        )
+
+    variant = next(
+        (v for v in stored.variants if v.variant_id == variant_id),
+        None,
+    )
+    if variant is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Variant '{variant_id}' not found.",
+        )
+
+    from app.data.loader import load_member_context
+    try:
+        member = load_member_context(member_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail=f"Member '{member_id}' not found.")
+
+    message = _generate_friendly_message(member.profile.name, variant)
+    return {"message": message}
+
+
+def _generate_friendly_message(member_name: str, variant) -> str:
+    """
+    Generate a friendly 3-sentence message based on the workout.
+
+    The message is encouraging, references the workout focus, and includes
+    a motivational closer.
+    """
+    first_name = member_name.split()[0]
+    plan = variant.plan
+
+    # Build focus phrase based on variant and stimulus
+    focus = variant.optimizes_for or variant.label
+    stimulus = plan.stimulus if plan.stimulus else focus
+
+    # Count exercises
+    total_exercises = len(plan.warmup) + len(plan.main) + len(plan.cooldown)
+    duration = plan.total_minutes
+
+    # Pick encouraging openers and closers based on variant type
+    openers = {
+        "strength": f"Hey {first_name}! I've put together a great {duration}-minute strength session for you.",
+        "conditioning": f"Hi {first_name}! Ready to get your heart pumping? Here's a {duration}-minute conditioning workout designed just for you.",
+        "mobility": f"Hey {first_name}! Here's a {duration}-minute recovery-focused session to help you move and feel better.",
+    }
+    opener = openers.get(variant.variant_id, f"Hey {first_name}! Here's your {duration}-minute workout for today.")
+
+    # Middle sentence about the workout content
+    middle = f"We're focusing on {stimulus.lower()} with {total_exercises} exercises tailored to your goals and current condition."
+
+    # Encouraging closer
+    closers = [
+        "Let me know if you have any questions - you've got this!",
+        "Take your time with each movement and listen to your body.",
+        "I'm here if you need any modifications or have questions!",
+        "Remember, consistency beats perfection - let's keep building!",
+    ]
+    import random
+    closer = random.choice(closers)
+
+    return f"{opener} {middle} {closer}"
 
 
 @router.patch("/refine", response_model=None)
@@ -334,6 +606,103 @@ async def refine(request: RefineRequest) -> dict:
     set_current_plan(request.member_id, output)
 
     return _serialise_output(output)
+
+
+@router.post("/regenerate", response_model=None)
+async def regenerate(request: RegenerateRequest) -> dict:
+    """
+    Regenerate the member's current plan as a fresh, distinct variation.
+
+    Unlike a plain re-generate, this feeds the previously generated session to
+    the LLM (via prior_plan_summary) so the new plan differs while honoring the
+    same prompt, time window, and safety constraints. An optional adjustment is
+    parsed for equipment/exercise exclusions and also passed to the LLM.
+
+    Returns HTTP 404 if no plan has been generated yet for the member.
+    """
+    llm = _get_llm()
+    if llm is None:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "ANTHROPIC_API_KEY is not configured. "
+                "Set the environment variable and restart the server."
+            ),
+        )
+
+    stored = get_current_plan(request.member_id)
+    if stored is None or not stored.variants:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"No plan found for member '{request.member_id}'. "
+                "Generate a plan first via POST /api/generate."
+            ),
+        )
+
+    kg = _get_kg()
+
+    from app.data.loader import load_member_context
+    try:
+        member = load_member_context(request.member_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail=f"Member '{request.member_id}' not found.")
+
+    prev_variant = stored.variants[0]
+    prompt = prev_variant.provenance.prompt
+    time_window = prev_variant.provenance.time_window_minutes
+    prior_summary = _summarise_plan(prev_variant)
+
+    # Parse the adjustment for hard exclusions (equipment / exercises) the same
+    # way refine does, and keep the raw adjustment text for the LLM intent.
+    adjustment_text = (request.adjustment or "").strip() or None
+    refined_member = member
+    if adjustment_text:
+        import copy
+        extra_dislikes, _ = _parse_adjustment(adjustment_text)
+        if extra_dislikes:
+            refined_member = copy.deepcopy(member)
+            refined_member.preferences.dislikes = list(
+                set(refined_member.preferences.dislikes) | extra_dislikes
+            )
+
+    from app.generator.pipeline import GeneratorInput, generate_workout
+    gen_input = GeneratorInput(
+        prompt=prompt,
+        time_window_minutes=time_window,
+        member_id=request.member_id,
+        prior_plan_summary=prior_summary,
+        adjustment=adjustment_text,
+    )
+
+    output = await generate_workout(
+        input=gen_input,
+        kg=kg,
+        member=refined_member,
+        llm=llm,
+    )
+
+    set_current_plan(request.member_id, output)
+    return _serialise_output(output)
+
+
+def _summarise_plan(variant) -> str:
+    """
+    Build a compact text summary of a generated variant's plan, used as
+    regenerate context so the LLM can produce a distinct follow-up session.
+    """
+    plan = variant.plan
+
+    def _names(section) -> str:
+        return ", ".join(ex.name for ex in section) or "(none)"
+
+    lines = [
+        f"Stimulus: {plan.stimulus or '(unspecified)'}",
+        f"Warmup: {_names(plan.warmup)}",
+        f"Main: {_names(plan.main)}",
+        f"Cooldown: {_names(plan.cooldown)}",
+    ]
+    return "\n".join(lines)
 
 
 def _parse_adjustment(adjustment: str) -> tuple[set[str], str]:
@@ -456,6 +825,7 @@ def _serialise_output(output: GeneratorOutput) -> dict:
                     "inputs": step.inputs,
                     "outputs": step.outputs,
                     "kind": step.kind,
+                    "duration_ms": step.duration_ms,
                 }
             )
 

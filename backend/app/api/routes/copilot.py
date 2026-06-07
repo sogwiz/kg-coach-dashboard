@@ -89,6 +89,10 @@ class CopilotRequest(BaseModel):
     message: str = Field(min_length=1, max_length=2000)
     member_id: str = Field(default="mbr_01HX9JORDAN")
     attachments: list[ChatAttachment] = Field(default_factory=list)
+    # The dashboard surface the coach is currently viewing (e.g. "Generate",
+    # "Analytics", "Insights"). Injected as context so the agent's answers are
+    # aware of where the coach is in the product.
+    context: str | None = Field(default=None, max_length=120)
 
 
 # ---------------------------------------------------------------------------
@@ -147,6 +151,21 @@ def _build_agent(member_id: str):
         _agent_cache[member_id] = agent
 
     return agent
+
+
+def _with_context(message: str, context: str | None) -> str:
+    """
+    Prefix the coach's message with the dashboard surface they're viewing, so
+    the agent can tailor its answer. The prefix is server-side only — the UI
+    still shows the coach's raw text.
+    """
+    ctx = (context or "").strip()
+    if not ctx:
+        return message
+    return (
+        f"[Dashboard context: the coach is currently on the '{ctx}' surface for "
+        f"this member.] {message}"
+    )
 
 
 def _build_human_content(message: str, attachments: list[ChatAttachment]) -> list | str:
@@ -212,36 +231,16 @@ async def _seed_thread_if_needed(
     run_cfg: dict,
 ) -> None:
     """
-    Seed the conversation thread with the member's stored chat history on
-    the first turn (R2 — seed past history).
+    Intentionally a NO-OP.
 
-    Uses the agent's update_state method to inject historical messages into
-    the MemorySaver checkpointer so they become part of the thread context
-    before the first user message is processed.
-
-    This is a no-op after the first call for a given thread_id.
+    The Copilot is the trainer↔AI conversation and is kept SEPARATE from the
+    trainer↔client message history. We no longer replay the member's client
+    chat into the agent thread (which conflated the two). The agent remains
+    aware of client messages on demand via the `chat_history_search` tool, and
+    of the day's priorities via `morning_brief`. The client conversation itself
+    lives in the dedicated Client Inbox UI.
     """
-    if thread_id in _seeded_threads:
-        return
-
-    _seeded_threads.add(thread_id)
-
-    from app.copilot.agent import _seed_messages_for_member
-
-    seed_msgs = _seed_messages_for_member(member_id)
-    if not seed_msgs:
-        return
-
-    # Inject seed messages as the initial thread state
-    try:
-        agent.update_state(
-            config={"configurable": {"thread_id": thread_id}},
-            values={"messages": seed_msgs},
-        )
-    except Exception:
-        # If update_state fails (e.g. different LangGraph version), continue
-        # without seeding — the agent will still work for the current turn.
-        pass
+    return
 
 
 # ---------------------------------------------------------------------------
@@ -293,8 +292,10 @@ async def chat(request: CopilotRequest) -> StreamingResponse:
     # Seed history on first turn (R2 — seed past history)
     await _seed_thread_if_needed(agent, request.member_id, thread_id, run_cfg)
 
-    # Build human content (text + optional image blocks)
-    human_content = _build_human_content(request.message, request.attachments)
+    # Build human content (text + optional image blocks), tab-aware
+    human_content = _build_human_content(
+        _with_context(request.message, request.context), request.attachments
+    )
 
     async def _stream() -> AsyncIterator[str]:
         """Stream the agent's final response text, chunk by chunk."""
@@ -371,7 +372,9 @@ async def chat_sync(request: CopilotRequest) -> dict:
     # Seed history on first turn
     await _seed_thread_if_needed(agent, request.member_id, thread_id, run_cfg)
 
-    human_content = _build_human_content(request.message, request.attachments)
+    human_content = _build_human_content(
+        _with_context(request.message, request.context), request.attachments
+    )
 
     try:
         result = await agent.ainvoke(

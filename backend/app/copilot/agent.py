@@ -868,43 +868,62 @@ def chat_history_search(member_id: str, query: str = "") -> dict:
 
 
 _COPILOT_SYSTEM_PROMPT = """\
-You are an expert AI coaching assistant helping a coach manage their members.
-You have access to tools that retrieve member data from the Member Knowledge Graph.
+You are an expert AI coaching assistant helping a coach with ONE specific,
+already-selected member (member id: __MEMBER_ID__).
+
+ACTIVE MEMBER (CRITICAL):
+  - Every tool already operates on this exact member automatically.
+  - You therefore NEVER need a member id and must NEVER ask the coach for one.
+  - When the coach says "they", "this member", "the client", or "today", they
+    mean this active member. Just call the relevant tool.
+  - The coach's current dashboard tab may be provided as "[Dashboard context: …]"
+    — use it to interpret vague references (e.g. on the Generate tab, "this
+    workout" means the current plan).
 
 ANTI-FABRICATION RULE (CRITICAL):
-  - You MUST call the appropriate tool to get data before answering.
-  - You MUST NOT invent, guess, or extrapolate member data.
-  - If the tool result does not contain the data needed to answer, say so
-    explicitly: "The Member KG does not have data to support that answer."
+  - Call the appropriate tool to get data before answering.
+  - Do NOT invent, guess, or extrapolate member data.
+  - If a tool result lacks the needed data, say so explicitly.
   - Only cite values that appear verbatim in the tool response.
 
-TOOL SELECTION GUIDE:
-  - Adherence questions       → adherence_trend
-  - Morning brief / churn     → morning_brief
-  - Injury / healing phase    → injury_status
-  - Sleep / biomarkers        → sleep_summary
-  - Lab results / bloodwork   → lab_results
-  - Body composition / DEXA   → body_composition
-  - Past workouts             → workout_history
-  - Goals / preferences       → goals_and_preferences
-  - Chat history / messages   → chat_history_search
-  - Workout plan questions    → current_workout_plan
-  - Injury progress / trend   → injury_progress
-  - Healing phase / timeline  → healing_phase_explanation
+TOOL SELECTION GUIDE (member data → these tools):
+  - Adherence              → adherence_trend
+  - Morning brief / churn  → morning_brief
+  - Injury / healing       → injury_status / injury_progress / healing_phase_explanation
+  - Sleep / biomarkers     → sleep_summary
+  - Labs / bloodwork       → lab_results
+  - Body comp / DEXA       → body_composition
+  - Past workouts          → workout_history
+  - Goals / preferences    → goals_and_preferences
+  - Chat history           → chat_history_search
+  - Current workout plan   → current_workout_plan
 
-WORKOUT PLAN: Call `current_workout_plan` whenever the coach mentions:
-  - "this workout", "the plan", "the session", "these exercises"
-  - "stimulus", "target adaptation", "what are we training for"
-  - "why" in a workout context (why these exercises, why this order)
-  - "order", "sequence", "why is X first/last"
-  - "compare the variants", "which variant", "strength vs conditioning"
-  - "what was filtered out", "excluded exercises", "safety"
+GENERIC KNOWLEDGE → search_corpus:
+  - For open-ended questions about training methods, diets, recovery, or
+    competition formats that are NOT about THIS member's own data — e.g.
+    "what is Zone 2?", "explain 5x5", "is keto good for HYROX?", "what's a
+    deload?" — call `search_corpus` and ground your answer in the returned
+    docs, citing the title. Do NOT answer these from memory.
+  - If a question blends both (e.g. "should THIS member do Zone 2?"), combine
+    member tools with search_corpus.
 
-When you have data from a tool, ground your answer in those exact values.
-Do not elaborate beyond what the data says.
+CLIENT INBOX (trainer↔client messages):
+  - You are the trainer's AI assistant — this is a conversation between YOU and
+    the coach. The coach's messages with the CLIENT live in a separate Inbox.
+  - Use `chat_history_search` to read that client conversation when relevant.
+  - When you reference a SPECIFIC client message, append its deep-link token
+    "[[msg:<ts>]]" using that message's exact ts, so the coach can jump to it in
+    the Inbox. Example: "She flagged knee stiffness on Jun 4
+    [[msg:2026-06-04T08:12:00]] — worth a check-in."
+  - For "what should I focus on today / priorities / the brief", call
+    `morning_brief`.
 
-Keep answers concise and always cite the specific data you retrieved.
-If the coach asks a follow-up, call tools again with the same member_id.
+WORKOUT PLAN: call `current_workout_plan` whenever the coach mentions "this
+workout", "the plan", "the session", "these exercises", "stimulus", "why these
+exercises / this order", "which variant", or "what was filtered out".
+
+Ground answers in retrieved values, keep them concise, and cite what you
+retrieved. Never ask for a member id.
 """
 
 
@@ -985,39 +1004,52 @@ def create_copilot_agent(member_kg: "Any", llm: "Any") -> "Any | None":
         # Wrap tool functions as LangChain tools with type annotations
         # so the LLM can call them by name.
 
+        # The agent serves ONE already-selected member. Bind their id into every
+        # tool so the model never needs — and cannot ask for — a member id.
+        member_id = member_kg.get_member_id()
+
+        # Default injury id for the injury tools (the member's first injury).
+        first_injury_id: str | None = None
+        try:
+            from app.data.loader import load_member_context
+
+            _m = load_member_context(member_id)
+            if _m.injuries:
+                first_injury_id = _m.injuries[0].id
+        except Exception:
+            first_injury_id = None
+
         @tool_decorator
-        def adherence_trend_tool(member_id: str, weeks: int = 4) -> dict:
+        def adherence_trend_tool(weeks: int = 4) -> dict:
             """Return the member's session adherence trend for the past N weeks."""
             return adherence_trend(member_id, weeks)
 
         @tool_decorator
-        def morning_brief_tool(member_id: str) -> dict:
+        def morning_brief_tool() -> dict:
             """Return the coach's morning brief for the member (tasks + churn risk)."""
             return morning_brief(member_id)
 
         @tool_decorator
-        def injury_status_tool(member_id: str) -> dict:
+        def injury_status_tool() -> dict:
             """Return the member's active injuries with current healing phase and latest check-in."""
             return injury_status(member_id)
 
         @tool_decorator
-        def sleep_summary_tool(member_id: str) -> dict:
+        def sleep_summary_tool() -> dict:
             """Return the member's sleep data and biomarkers for the past 7 days."""
             return sleep_summary(member_id)
 
         @tool_decorator
-        def current_workout_plan_tool(
-            member_id: str, variant_id: str | None = None
-        ) -> dict:
-            """Read the most recently generated workout plan. Returns all 3 variants
-            (or one if variant_id given) with stimulus, target_adaptation,
-            design_rationale, per-exercise rationale, sequencing_rationale, and
-            safety-filter provenance. Call this whenever the coach asks about the
-            workout, exercises, stimulus, why exercises were chosen, or their order."""
+        def current_workout_plan_tool(variant_id: str | None = None) -> dict:
+            """Read the member's most recently generated workout plan: stimulus,
+            target_adaptation, design_rationale, per-exercise rationale,
+            sequencing_rationale, and safety-filter provenance. Call this whenever
+            the coach asks about the workout, exercises, stimulus, why exercises
+            were chosen, or their order."""
             return current_workout_plan(member_id, variant_id)
 
         @tool_decorator
-        def lab_results_tool(member_id: str) -> dict:
+        def lab_results_tool() -> dict:
             """Return the member's latest lab results: blood panel (lipids, HbA1c,
             vitamin D, ferritin, CRP, hormone panel) and DEXA body-composition scan.
             Call this when asked about labs, bloodwork, testosterone, cortisol,
@@ -1025,7 +1057,7 @@ def create_copilot_agent(member_kg: "Any", llm: "Any") -> "Any | None":
             return lab_results(member_id)
 
         @tool_decorator
-        def body_composition_tool(member_id: str) -> dict:
+        def body_composition_tool() -> dict:
             """Return the member's DEXA body-composition data: body fat %, lean mass,
             fat mass, bone density, visceral fat, and weight trend.
             Call this when asked about body composition, DEXA, body fat, lean mass,
@@ -1033,21 +1065,21 @@ def create_copilot_agent(member_kg: "Any", llm: "Any") -> "Any | None":
             return body_composition(member_id)
 
         @tool_decorator
-        def workout_history_tool(member_id: str, limit: int = 10) -> dict:
+        def workout_history_tool(limit: int = 10) -> dict:
             """Return the member's recent logged workout sessions (date, title,
             duration, RPE, exercises performed). Call this when asked about past
             workouts, recent sessions, training history, or what they did last week."""
             return workout_history(member_id, limit)
 
         @tool_decorator
-        def goals_and_preferences_tool(member_id: str) -> dict:
+        def goals_and_preferences_tool() -> dict:
             """Return the member's goals (text, priority, target date) and training
             preferences (session length, training days, dislikes, notes).
             Call this when asked about goals, objectives, preferences, or dislikes."""
             return goals_and_preferences(member_id)
 
         @tool_decorator
-        def chat_history_search_tool(member_id: str, query: str = "") -> dict:
+        def chat_history_search_tool(query: str = "") -> dict:
             """Return the member's stored chat history transcript. Optionally filter
             by a search query (case-insensitive substring match on message text).
             Call this when asked about past conversations, what was said before,
@@ -1055,19 +1087,31 @@ def create_copilot_agent(member_kg: "Any", llm: "Any") -> "Any | None":
             return chat_history_search(member_id, query)
 
         @tool_decorator
-        def injury_progress_tool(member_id: str, injury_id: str, days: int = 14) -> dict:
-            """Return injury state history with trend analysis. Shows pain level,
-            inflammation, and load tolerance over the past N days, with a trend
-            direction (improving/stable/worsening).
-            Call this when asked about injury progress, healing trend, or 'how is my knee/back healing?'"""
-            return injury_progress(member_id, injury_id, days)
+        def injury_progress_tool(injury_id: str | None = None, days: int = 14) -> dict:
+            """Return the member's injury state history with trend analysis (pain,
+            inflammation, load tolerance over N days). Defaults to their primary
+            injury. Call this for injury progress, healing trend, or 'how is the
+            knee/back healing?'"""
+            return injury_progress(member_id, injury_id or first_injury_id or "", days)
 
         @tool_decorator
-        def healing_phase_explanation_tool(member_id: str, injury_id: str) -> dict:
-            """Explain the current healing phase for the given injury. Returns current phase,
-            restrictions, load tolerance cap, and expected timeline to next phase.
-            Call this when asked about healing phase, injury recovery timeline, or movement restrictions."""
-            return healing_phase_explanation(member_id, injury_id)
+        def healing_phase_explanation_tool(injury_id: str | None = None) -> dict:
+            """Explain the member's current healing phase: restrictions, load cap, and
+            expected timeline to the next phase. Defaults to their primary injury.
+            Call this for healing phase, recovery timeline, or movement restrictions."""
+            return healing_phase_explanation(member_id, injury_id or first_injury_id or "")
+
+        @tool_decorator
+        def search_corpus_tool(query: str) -> dict:
+            """Search the GENERIC training/diet/recovery/competition knowledge corpus
+            (Zone 2, 5x5, 5/3/1, CrossFit, HYROX, Tactical Games, Mediterranean diet,
+            keto, protein intake, RPE/RIR, deloads, TB12). Use for open-ended
+            'what is X / explain X / is X good for Y' questions that are NOT about
+            this specific member's own data. Returns ranked docs; ground your answer
+            in their content and cite the title."""
+            from app.copilot.rag import search_corpus
+
+            return search_corpus(query)
 
         tools = [
             adherence_trend_tool,
@@ -1082,6 +1126,7 @@ def create_copilot_agent(member_kg: "Any", llm: "Any") -> "Any | None":
             chat_history_search_tool,
             injury_progress_tool,
             healing_phase_explanation_tool,
+            search_corpus_tool,
         ]
 
         # Rename tools to cleaner names for the LLM
@@ -1097,6 +1142,7 @@ def create_copilot_agent(member_kg: "Any", llm: "Any") -> "Any | None":
         chat_history_search_tool.name = "chat_history_search"
         injury_progress_tool.name = "injury_progress"
         healing_phase_explanation_tool.name = "healing_phase_explanation"
+        search_corpus_tool.name = "search_corpus"
 
         # Compile with MemorySaver for per-member conversation memory (R2)
         checkpointer = MemorySaver()
@@ -1104,7 +1150,7 @@ def create_copilot_agent(member_kg: "Any", llm: "Any") -> "Any | None":
         agent = create_react_agent(
             llm,
             tools=tools,
-            prompt=_COPILOT_SYSTEM_PROMPT,
+            prompt=_COPILOT_SYSTEM_PROMPT.replace("__MEMBER_ID__", member_id),
             checkpointer=checkpointer,
         )
         return agent

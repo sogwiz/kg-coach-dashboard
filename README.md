@@ -32,10 +32,12 @@ flowchart TD
     subgraph Dashboard["Coach Dashboard (React + Tailwind)"]
         Login["Mock Auth\n(LoginScreen)"]
         MemberSwitcher["Member Switcher\n(Jordan / Mico)"]
-        Generator["Generator Panel\n(prompt + time → 3 variants)"]
-        Copilot["Copilot Chat\n(streaming, charts, history)"]
+        Generator["Generator Panel\nprompt + time → 1 session + gauges\n(hybrid / full-LLM toggle, streaming)"]
+        Copilot["Copilot (floating drawer)\ntrainer↔AI · context-aware"]
+        Inbox["Client Inbox\ntrainer↔client messages\n(deep-linked from Copilot)"]
         GraphExplorer["Graph Explorer\n(force-directed, provenance)"]
-        Canvas["Creative Canvas\n(n8n-style builder)"]
+        Canvas["Creative Canvas\n3-column grid + Synthesize"]
+        Analytics["Analytics\n(adherence / sleep / labs / injury)"]
         CheckIn["Injury Check-In\n(inflammation + pain triggers)"]
     end
 
@@ -43,10 +45,13 @@ flowchart TD
         API["REST API\n/api/*"]
         Resolver["3-Pass Resolver\nexact → fuzzy → embedding"]
         Filter["Conditional Safety Filter\n(deterministic, no LLM)"]
-        Generator2["Generator Pipeline\nLangChain structured call × 3"]
-        CopilotAgent["Copilot Agent\nLangGraph + MemorySaver"]
+        Assembler["Deterministic Assembler\n(hybrid engine — instant)"]
+        Generator2["Generator Pipeline\nhybrid: assemble + narrate\n| full-LLM: structure_plan"]
+        CopilotAgent["Copilot Agent\nLangGraph + MemorySaver + tools"]
+        CorpusRAG["Corpus RAG\nsearch_corpus (MiniLM cosine\n+ keyword fallback)"]
+        Synth["Workout Synthesis\n(deterministic adaptation analysis)"]
         Provenance["PROV-O Builder\nbuild_provenance()"]
-        DecisionTrace["Decision Trace\nDecisionStep[]"]
+        DecisionTrace["Decision Trace\nDecisionStep[] (timed)"]
     end
 
     subgraph KGs["Knowledge Graphs (NetworkX)"]
@@ -62,10 +67,11 @@ flowchart TD
         OPE["OPE\nedge vocabulary\ntargets / stresses / requires"]
     end
 
-    subgraph External["External Services"]
-        LLM["Anthropic Claude\n(Haiku for speed)"]
+    subgraph External["Models & Corpus"]
+        LLM["Anthropic Claude\nclaude-haiku-4-5"]
         LangSmith["LangSmith\n(optional tracing)"]
         Embeddings["sentence-transformers\nall-MiniLM-L6-v2"]
+        Corpus["Knowledge Corpus (vector store)\ndata/corpus.json — Zone 2, 5x5,\nHYROX, keto, TB12, ..."]
     end
 
     Login --> API
@@ -81,13 +87,20 @@ flowchart TD
     Filter --> KG1
     Filter -->|"descendants_by_part_of(joint)"| SNOMED
     API --> Generator2
+    Generator2 --> Assembler
     Generator2 --> LLM
     Generator2 --> Provenance
     Generator2 --> DecisionTrace
     API --> CopilotAgent
     CopilotAgent --> KG2
+    CopilotAgent --> CorpusRAG
+    CorpusRAG --> Corpus
+    CorpusRAG --> Embeddings
     CopilotAgent --> LLM
     CopilotAgent --> LangSmith
+    Canvas --> Synth
+    Synth --> KG1
+    Inbox -->|"GET /copilot/.../chat-history"| API
 
     KG1 --- SharedConcepts
     KG2 --- SharedConcepts
@@ -103,22 +116,32 @@ flowchart TD
 ### Request Flow: Workout Generation
 
 ```
-Coach prompt → POST /api/generate
-  → load_member_context(member_id)           # equipment, dislikes, injuries
-  → conditional_safety_filter(candidates, injury, equipment, ...)
+Coach prompt → POST /api/generate  (or /api/generate/stream for staged progress)
+  → load_member_context(member_id)            # equipment, dislikes, injuries
+  → conditional_safety_filter(candidates, injury, equipment, ...)   # DETERMINISTIC
        → injury.computed_phase()              # healing phase from onset_date
-       → kg.descendants_by_part_of(joint)    # SNOMED part-of traversal
-       → exclude exercises by movement_type  # flexion/extension/rotation/load/impact
-       → equipment gate                      # requires ⊆ available_equipment
+       → kg.descendants_by_part_of(joint)     # SNOMED part-of traversal
+       → exclude exercises by movement_type   # flexion/extension/rotation/load/impact
+       → equipment gate                       # requires ⊆ available_equipment
        → FilterTrace { safe, removed, substitutions, injury_state_used }
-  → LLM.structure_plan(safe_exercises, intent="strength") → WorkoutPlan   ┐
-  → LLM.structure_plan(safe_exercises, intent="conditioning") → WorkoutPlan ├ concurrent
-  → LLM.structure_plan(safe_exercises, intent="mobility") → WorkoutPlan   ┘
-  → build_provenance(plan, trace, constraints, timing) → ProvODocument
-  → build_decision_trace(...) → DecisionStep[]
-  → set_current_plan(member_id, output)      # persisted for Copilot access
-  → GeneratorOutput { variants[3], trace, prov_documents, decision_trace }
+  → structure the SAFE set into ONE WorkoutPlan, by engine:
+       engine="hybrid" (default, ~5s):
+         → assemble_plan(...)                 # deterministic: selection, sections,
+         │                                    #   sets/reps/rest, roles, templated
+         │                                    #   per-exercise reasons, gauges
+         → narrate_plan(...) via LLM          # writes ONLY the 4 session-level
+         │                                    #   prose fields (~300 tokens)
+       engine="llm" (toggle, ~18s):
+         → structure_plan(...) via LLM        # the model writes the entire plan
+  → build_provenance(plan, trace, ...) → ProvODocument   # PROV-O "what was filtered + why"
+  → build_decision_trace(...) → DecisionStep[]           # timed, inspectable
+  → set_current_plan(member_id, output)       # persisted for Copilot access
+  → GeneratorOutput { variants[1], trace_summary, prov, decision_trace }
 ```
+
+The session reports its own **strength / conditioning / mobility** stimulus
+distribution (rendered as gauges), so a single workout replaces the older
+three-variant fan-out.
 
 ---
 
@@ -141,6 +164,22 @@ Coach prompt → POST /api/generate
 | Copilot | LangGraph agent + MemorySaver | The Copilot *is* a multi-step agent: it decides which tools to call (adherence_trend, injury_status, current_workout_plan, lab_results, ...), maintains conversation memory across turns, and may chain multiple tool calls per response. LangGraph's state machine + checkpointer handles this cleanly. |
 
 This split avoids over-engineering: the generator doesn't need an agent loop; the Copilot does.
+
+**Two generation engines (the speed decision).** LLM latency scales with
+*output* tokens, and having the model emit the entire structured plan
+(per-exercise sets/reps/rationale × N + session prose) is ~2,000 tokens → ~18s.
+So the generator has two engines, switchable in the UI:
+
+| Engine | How | Latency | When |
+|---|---|---|---|
+| **Hybrid** (default) | A **deterministic assembler** (`assembler.py`) builds the structure — selection, sectioning, sets/reps/rest, sequencing roles, rule-templated per-exercise reasons, and the stimulus distribution — from graph rules over the safe set. A **narrow LLM call** (`narrate.py`) then writes *only* the 4 session-level prose fields (~300 tokens). | **~5s** | default; "the graph makes the decisions, the model describes them" |
+| **Full LLM** | The model structures the whole plan (`structure_plan`). | ~18s | when you want every per-exercise line model-written |
+
+The hybrid mirrors the assessment thesis literally and is ~4× faster with no
+loss of the session-level "why." Safety is identical in both — the assembler
+and the LLM only ever see the post-filter safe set. (Streaming — `/api/generate/stream`
+emits `resolve → safety result → structuring → plan` — makes either engine
+*feel* immediate by showing the deterministic safety counts in ~1s.)
 
 **sentence-transformers (`all-MiniLM-L6-v2`)** for the embedding pass of the resolver: fast (CPU), small (80MB), strong on short fitness phrases. Runs locally — no API cost for the resolver.
 
@@ -413,78 +452,68 @@ Everything else (LLM structuring quality, provenance formatting, chart rendering
 
 ## Worked Examples
 
-### Example A: Injury Case — Jordan (knee flexion, home gym, remodeling phase)
+> The values below are **real output from the running system** (hybrid engine),
+> not illustrative — captured via `POST /api/generate`.
 
-**Setup:** Jordan, 2026-06-06, check-in `pain_on: [flexion], load_tolerance: 70%`. Home gym: 5 items (no barbell).
+### Example A — Injury **and** limited-equipment case · Jordan (left knee, home gym)
 
-**Prompt:** `"lower body strength, 45 minutes"`
+**Setup:** Jordan — left-knee PFPS, *remodeling* phase, today's check-in `pain_on: [flexion]`, `load_tolerance: 70%`; home gym = dumbbells + kettlebell + bands (**no barbell, no rack, no machines, no pull-up bar**).
 
-**Decision trace:**
+**Prompt:** `"lower body strength"` · 45 min
+
+**Filtering trace — 17 safe / 54 removed**, two gates visible at once:
 
 ```
-Step 1: resolve_prompt
-  → "lower body" → lower_push_squat, lower_pull_hip_lift (exact)
+INJURY (part-of + movement-type)  — 32 removed, e.g.:
+  Kettlebell Goblet Cyclist Squat :: movement type(s) ['flexion'] excluded at
+      injured joint 'Knee' (phase: remodeling; pain on: ['flexion'])
+  RNT Split Squat                 :: ['flexion'] excluded at 'Knee' ...
+  Static Jump / Med Ball Scoop Toss :: ['flexion'] excluded at 'Knee' ...
 
-Step 2: load_constraints
-  → equipment: {Dumbbell, Kettlebell, Yoga Mat, Resistance Band - Loop, Flat Bench}
-  → injury: knee (remodeling, pain on flexion)
-
-Step 3: part_of_traversal
-  → descendants_by_part_of("knee")
-  → {knee, 49076000, 57714003 (patellofemoral), 182204001 (tibiofemoral), ...}
-  → 8 descendant nodes
-
-Step 4: movement_type_exclusion
-  → Excluded by pain_on [flexion]:
-    - Kettlebell Goblet Cyclist Squat (knee: flexion, load)
-    - Bulgarian Split Squat (knee: flexion, load)
-    - Leg Press (knee: flexion, load)
-  → Excluded by phase-level restriction: none (remodeling phase)
-
-Step 5: equipment_gate
-  → Excluded for missing equipment (Barbell, Rack, Cable Machine, etc.):
-    - Barbell Back Squat, Barbell Romanian Deadlift, Cable Pull-Through...
-  → 12 exercises removed by equipment gate
-
-Step 6: llm_structuring
-  → 28 safe exercises → 3 variants
+EQUIPMENT GATE — e.g.:
+  Barbell Decline Bench Press     :: requires unavailable equipment: Barbell, Rack, Plate
+  Isometric Pull-Up               :: requires unavailable equipment: Pull-Up Bar
+  Machine - Single-Arm Lat Pull-Down :: requires unavailable equipment: Lat Pulldown Machine
 ```
 
-**PROV-O filtered_out entry for Kettlebell Goblet Cyclist Squat:**
-```json
-{
-  "prov:type": "prov:Entity",
-  "prov:id": "entity:filtered_exercise_00036a08-...",
-  "exercise_name": "Kettlebell Goblet Cyclist Squat",
-  "reason": "movement type(s) ['flexion', 'load'] excluded at injured joint 'Knee Joint' (phase: remodeling; pain on: ['flexion'])",
-  "graph_path": ["knee", "patellofemoral_joint", "tibiofemoral_joint"],
-  "injury_constraint": "movement types: ['flexion', 'load']"
-}
-```
+**Resulting plan** (knee-safe, barbell-free, 70% load cap applied):
 
-**3 variants produced:**
-- **Strength & Hypertrophy**: Kettlebell RDL, Hip Thrust, Hamstring Curl, Banded Clamshell (3×10, 90s rest)
-- **Conditioning & Metabolic**: EMOM circuit — KB swings, banded glute bridge, step-up, bird dog
-- **Mobility & Recovery**: Hip 90/90, banded clamshell, standing hip hinge, foam roll hamstrings
+| Section | Exercises |
+|---|---|
+| Warmup | High Plank Bird Dog (2×40s), Walking Toe Touches (2×12), Ground Upper Trap Stretch (2×40s) |
+| Main | One-Kettlebell Hamstring Walkout (4×40s), Farmers Carry (4×40s), Dumbbell Suitcase Carry (4×40s), Single-Arm KB Rack Carry (4×40s), Push-Up to Knee-Drive (4×5) |
+| Cooldown | Standing Neck Circles (1×40s) |
 
-All three variants share zero knee-flexion exercises. Load tolerance 70% cap applied to strength variant intensity.
+**Stimulus gauges:** strength 23 · conditioning 56 · mobility 36. Note the plan
+contains **zero knee-flexion movements** and **zero barbell movements** — the
+LLM never saw them, because the deterministic filter removed all 54 before
+structuring. This single example satisfies both the *injury* and the
+*limited-equipment* requirement.
 
 ---
 
-### Example B: Injury Case — Mico (lumbar, pain on flexion + load)
+### Example B — Second injury case · Mico (lumbar spine, full gym)
 
-**Setup:** Mico, 2026-06-06, check-in `pain_on: [flexion, load], load_tolerance: 60%`. Full gym access.
+**Setup:** Mico — desk-induced mechanical low-back pain; full gym access. The
+intent (pre-filled from his morning brief) is to *avoid loaded lumbar flexion*.
 
-**Prompt:** `"HYROX prep, 60 minutes"`
+**Prompt:** `"upper body strength and conditioning"` · 50 min
 
-**Movement type exclusion:**
-- Exercises with `lumbar_spine: [flexion]`: Barbell Deadlift, Good Morning, Bent-Over Barbell Row, Cable Pull-Through → REMOVED
-- Exercises with `lumbar_spine: [load]`: Barbell Back Squat → REMOVED
-- Exercises with `lumbar_spine: [rotation]` (remodeling phase restriction: none — RTA phase, no phase restrictions): retained
+**Filtering trace — 40 safe / 31 removed.** The lumbar exclusions show the
+**conservative-exclusion fallback**: exercises that stress the lumbar spine but
+lack a movement-type annotation are removed anyway (fail-safe), not assumed safe:
 
-**Safe set includes:** SkiErg, Rower, Sled Push, Wall Ball, Bulgarian Split Squat (hip dominant, minimal lumbar load), Pallof Press, Dead Bug, RDL with control cues...
+```
+INJURY (part-of, conservative) — 12 removed, e.g.:
+  Walking Toe Touches   :: stresses injured joint 'lumbar_spine'
+      (no movement-type annotation; conservative exclusion)
+  Sandbag Lunge         :: stresses injured joint 'lumbar_spine' (conservative)
+  Rowing Ergometer / SkiErg Sprint :: stresses 'lumbar_spine' (conservative)
+```
 
-**HYROX-prep template** applied (Phase 11): station_brick phase with rower + functional stations, primer phase with T-spine mobility.
+Same `conditional_safety_filter` function as Jordan's knee — only the injured
+joint, its SNOMED `part-of` subtree, and today's check-in differ. The safe set
+that reaches the assembler/LLM is upper-body and core-stable by construction.
 
 ---
 
@@ -501,56 +530,59 @@ The same `conditional_safety_filter` function handles both — the healing phase
 
 ---
 
-### Example D: Limited Equipment (Jordan home gym)
+### Example D: Equipment substitution
 
-Without barbell: the equipment gate removes 12+ barbell exercises. The substitution logic finds:
-- **Barbell Romanian Deadlift** → **Kettlebell Single-Leg RDL** (same pattern: `lower_pull_hip_lift`, same primary muscle: hamstrings)
-- **Barbell Hip Thrust** → **Dumbbell Hip Thrust** or **Banded Hip Thrust**
-
-Substitutions are recorded in `FilterTrace.substitutions` with rationale and surfaced in the ProvenanceTrace panel.
+Beyond removal, the filter records substitutions in `FilterTrace.substitutions`
+(surfaced in the Provenance panel): a removed exercise is matched to a safe one
+sharing its movement pattern + primary muscle — e.g. **Barbell Romanian
+Deadlift** → **Kettlebell Single-Leg RDL** (`lower_pull_hip_lift`, hamstrings).
 
 ---
 
-### Example E: Copilot Grounded Follow-Up
+### Example E: Copilot grounded follow-up (+ deep-link + corpus)
 
-**Coach:** "How's Jordan's adherence trending? And based on the plan we just generated, what's the primary stimulus?"
+**Coach:** "What's the primary stimulus of the plan we just made — and is Zone 2 worth adding for him?"
 
-**Copilot:**
-1. Calls `adherence_trend(member_id, weeks=4)` → retrieves 4-week adherence series from KG2
-2. Calls `current_workout_plan(member_id, variant_id="strength")` → retrieves the stored `WorkoutPlan` from the generator store
-3. Responds: "Jordan's adherence has dropped from 85% (3 weeks ago) to 62% this week — the lowest in the tracked period, consistent with the elevated churn risk flag. The plan we just generated targets **lower-body strength with hypertrophy stimulus** (quad/glute) at 70% load tolerance — specifically chosen to provide training stimulus without triggering knee flexion, per today's check-in."
+The Copilot (the floating drawer — a trainer↔AI conversation, **separate** from the trainer↔client Inbox):
+1. Calls `current_workout_plan(member_id)` → reads the stored plan + its stimulus distribution.
+2. The "is Zone 2 worth it" half is **generic knowledge**, so it calls `search_corpus("zone 2")` → grounds the answer in the corpus doc (cites "Zone 2 Training"), rather than inventing it.
+3. When it references a past **client** message it appends a `[[msg:<ts>]]` token, rendered as a clickable chip that opens the **Client Inbox** at that exact message.
 
-The Copilot never invents data. If the KG lacks a datum (e.g. no lab results loaded), it says so.
+The Copilot never invents member data — every fact traces to a KG tool return; if the KG lacks a datum it says so. Generic training/diet/competition questions are grounded in the corpus, and **safety is never RAG** — it stays deterministic graph traversal.
 
 ---
 
 ## How to Run Locally
 
-### Prerequisites
-
-- **Python 3.12+** with [uv](https://github.com/astral-sh/uv)
-- **Node 18+** with npm
-- **Anthropic API key** (for workout generation and Copilot)
-
-### One-command setup and run
+### One command — Docker (recommended)
 
 ```bash
-# 1. Clone the repo
-git clone <repo-url>
+git clone git@github.com:future-research/candidate-assessment.git
 cd candidate-assessment
-
-# 2. Copy and fill in environment variables
-cp .env.example .env
-# Edit .env: set ANTHROPIC_API_KEY=sk-ant-...
-
-# 3. Install everything
-make setup
-
-# 4. Start both backend (port 8000) and frontend (port 5173)
-make dev
+cp .env.example .env          # set ANTHROPIC_API_KEY=sk-ant-...
+docker compose up --build     # → http://localhost:8080
 ```
 
-Open `http://localhost:5173`. Login with: **username: `coach`**, **password: `coach`**.
+That's the whole thing. The stack is **self-contained**: the seed JSON is baked
+into the backend image (no external database), and the `all-MiniLM-L6-v2`
+embedding model is downloaded once on first boot into a cached volume. The
+frontend (nginx) serves the built SPA and proxies `/api` to the backend.
+
+Open **`http://localhost:8080`** and sign in with **any email + any password**
+(mock auth — see `LoginScreen` / `/api/auth/login`).
+
+> Port 8080 is chosen so it never collides with a local dev server on 5173/8000.
+
+### Alternative — local dev (`make dev`)
+
+For hot-reload development without Docker:
+
+```bash
+make setup        # uv sync (backend) + npm install (frontend)
+make dev          # FastAPI :8000 + Vite :5173  → http://localhost:5173
+```
+
+Requires **Python 3.12+** with [uv](https://github.com/astral-sh/uv) and **Node 20+**.
 
 ### Environment Variables
 
@@ -570,17 +602,20 @@ LANGCHAIN_PROJECT=kg-coach-dashboard
 |---|---|
 | `make setup` | Install backend (uv) + frontend (npm) dependencies |
 | `make dev` | Start backend (port 8000) + frontend (port 5173) concurrently |
-| `make backend` | Start only the backend |
-| `make frontend` | Start only the frontend |
+| `make backend` / `make frontend` | Start one side only |
 | `make test` | Run full pytest suite |
 | `make check` | Run tests + frontend build + typecheck |
 
 ### Running tests only
 
 ```bash
-cd backend && uv run pytest -v
-# 588 passed, 16 skipped (as of Phase 12)
+cd backend && uv run pytest -q
 ```
+
+Tests cover the two load-bearing, LLM-independent paths — the **concept
+resolver** (`test_resolver.py`) and the **safety filter**
+(`test_safety_filter.py`, `test_conditional_filter.py`) — plus the member KG,
+generator, graph endpoint, provenance, and the **RAG corpus** (`test_rag.py`).
 
 ---
 
@@ -595,7 +630,10 @@ This project was built using Claude (Anthropic) as an AI pair programmer through
 - **Data annotation**: The `exercise_movements.json` joint-movement annotations (which exercises perform flexion/extension/rotation/load/impact at which joints) were initially drafted with Claude's help, then reviewed for clinical accuracy.
 - **README and SCHEMA.md**: Written with Claude, grounded in the actual codebase (not invented).
 
-Where AI assistance was used, the output was reviewed for correctness — especially for the safety filter logic, SNOMED traversal, and clinical reasoning. The AI never introduced safety-critical bugs without detection; the test suite serves as the guard.
+- **Iterative, verified build**: the UI was built and refined in tight loops where the agent drove a headless browser, screenshotted the result, and corrected against the rendered output (design fidelity, the check-in chart, the canvas grid, the engine toggle) rather than coding blind.
+- **Decision documentation**: where the spec was ambiguous (single vs. multi injury, `is_duration` data quality, hybrid vs. full-LLM, corpus RAG vs. Neo4j), the reasoning was written down — see *Challenges, Trade-offs, Technical Decisions* — because that reasoning is part of the deliverable.
+
+Where AI assistance was used, the output was reviewed for correctness — especially for the safety filter logic, SNOMED traversal, and clinical reasoning. The deterministic safety path is guarded by the test suite (`test_safety_filter.py`, `test_conditional_filter.py`); the LLM is never the safety boundary.
 
 ---
 
@@ -628,6 +666,36 @@ The NCI EVS REST API is public but throttled. We bake the anatomy snapshot to `s
 
 **Trade-off:** The snapshot is a point-in-time snapshot. SNOMED updates don't automatically flow in. Acceptable for the fixed injury types in scope (knee PFPS, lumbar back pain).
 
+### Challenge 5: Generation latency (the 18s problem)
+
+A single full-plan LLM call is ~18s because the model emits the entire
+structured plan. Rather than accept that or strip the detail, we split the work:
+a **deterministic assembler** builds the plan from graph rules and a **narrow LLM
+call** writes only the session prose (~5s). **Trade-off:** the hybrid's
+per-exercise reasons are rule-templated (good, but more generic than
+model-written), so we kept the full-LLM path behind a toggle for when richer
+per-line prose is wanted. We did **not** adopt a graph database for speed (a
+competing approach) — at ~100 nodes that would be operational weight without
+payoff, and it contradicts the in-process thesis.
+
+### Decision: ambiguous `is_duration` data → infer from name/pattern
+
+The seed `exercises.json` flags almost every exercise `is_duration: true`
+(including barbell presses), so that field is unreliable. Rather than trust it,
+the assembler infers time-vs-reps work from the exercise name/pattern
+(holds, planks, stretches, carries, isometrics). Documented here because it's a
+judgement call the data forced.
+
+### Decision: corpus RAG is an *enhancement*, never a safety path
+
+We added a small program/diet/competition knowledge corpus (`data/corpus.json`)
+so the Copilot can ground open-ended questions ("what is Zone 2?"). It uses
+cosine over the MiniLM embeddings we already load (embeddings *on* by default,
+keyword fallback). **Safety, selection, contraindications, and provenance remain
+deterministic graph traversal — never RAG.** A reviewer comparing us to a
+one-store Neo4j build will see we keep the safety-critical path local and
+deterministic by design.
+
 ### Decision: In-memory store (no database)
 
 All member check-ins and generated plans are stored in-memory (Python dicts) per server instance. This is intentional per the scope: "in-memory/stubbed per the design's 'mock auth is fine' scope." The API surface is designed for easy database substitution — the `store.py` module could be backed by Redis or PostgreSQL with minimal interface change.
@@ -648,8 +716,8 @@ The current model uses the first injury from each member's profile. Multiple sim
 | Safety filter recall | 0 false positives — no safe exercise incorrectly removed | Sample safe exercises per injury configuration, verify inclusion |
 | Concept resolver accuracy | >95% on curated prompt benchmark | Manual-labeled test prompts vs. resolved concepts |
 | Recommendation quality | Coach rating ≥4/5 on structured rubric | Coach feedback loop |
-| Generation latency | <5 seconds end-to-end (including 3 concurrent LLM calls) | p50/p99 latency on generate endpoint |
-| Token efficiency | <1000 tokens per structure_plan call | LangSmith token count tracking |
+| Generation latency | hybrid p50 ~5s / full-LLM ~18s; deterministic stages <5ms | per-phase timings in the decision trace (`duration_ms`); LangSmith for LLM spans |
+| Token efficiency | hybrid narration ~300 output tokens vs ~2,000 full-LLM | LangSmith token counts; trade output for latency via the engine toggle |
 | Copilot groundedness | 0 fabricated member data items | Tool-call logging: all facts must trace to a tool return value |
 
 ### Failure Modes
@@ -672,8 +740,14 @@ In production: every `ConditionalFilterTrace.removed` entry is logged with membe
 
 All of the following were implemented beyond the minimum requirements:
 
-- **Graph Explorer** — interactive force-directed visualization of KG1 with search, type filters, click-to-explain, and member-aware filtering (red edges for contraindicated paths). Implemented via `react-force-graph` + `/api/graph` endpoint.
-- **Streaming responses** — Copilot chat streams token-by-token via Server-Sent Events, matching the UX pattern of modern chat interfaces.
+- **Hybrid generation engine** — deterministic assembler + narrow LLM narration (~5s) with a UI toggle to the full-LLM engine; ~4× faster (see Stack section).
+- **Streaming generation** — `POST /api/generate/stream` emits staged progress (resolve → safety counts in ~1s → structuring → plan) so the coach gets feedback instead of a blank wait. Copilot chat also streams.
+- **Corpus RAG** — a program/diet/competition knowledge corpus the Copilot retrieves over for open-ended questions (`search_corpus`, MiniLM cosine + keyword fallback); strictly an enhancement, never a safety path.
+- **Copilot as a floating drawer + Client Inbox** — the Copilot (trainer↔AI) is separated from the trainer↔client message Inbox; the Copilot deep-links to specific client messages via `[[msg:<ts>]]` chips, and is aware of the morning brief + chat history via tools.
+- **Workout Synthesis** — the Creative Canvas can analyze a coach-built workout deterministically and report its *actual* training adaptation (e.g. "you built strength but the rep/rest scheme reads as hypertrophy"), so intended vs. actual is visible.
+- **Single session + stimulus gauges** — one workout that reports its own strength/conditioning/mobility distribution, replacing the older 3-variant fan-out; context-aware regenerate feeds the prior plan back to the model.
+- **Graph Explorer** — interactive force-directed KG1 view with search, type filters, click-to-explain, and member-aware filtering that **names the specific injury** behind each exclusion.
+- **Docker one-command deploy** — `docker compose up --build` → a self-contained stack on `:8080` (seed data baked in, model cached in a volume, nginx proxy).
 - **LangSmith observability** — full tracing of generator LLM calls and Copilot agent runs, with named traces and metadata tags for filtering in LangSmith.
 - **Deeper SNOMED anatomy** — both knee (5 sub-structures) and lumbar spine (3 sub-structures) are covered by real SNOMED `part-of` hierarchies.
 - **Longitudinal reasoning** — adherence time series, injury state history, and biomarker trends are all stored as KG2 nodes that the Copilot retrieves for trend analysis.

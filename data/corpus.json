@@ -1,0 +1,98 @@
+[
+  {
+    "id": "doc_zone2",
+    "title": "Zone 2 Training",
+    "category": "program",
+    "tags": ["aerobic base", "zone 2", "z2", "endurance", "mitochondria", "fat oxidation", "conversational pace"],
+    "content": "Zone 2 is steady aerobic work at roughly 60-70% of max heart rate, around the first ventilatory/lactate threshold, kept at a conversational pace. It builds mitochondrial density and fat oxidation and forms the aerobic base under higher-intensity work. Typical prescription is 150-180+ minutes per week of continuous easy effort (easy bike, ruck, incline walk, easy row). Done correctly it should feel almost too easy.",
+    "source": "General training knowledge (illustrative)"
+  },
+  {
+    "id": "doc_5x5",
+    "title": "StrongLifts 5x5",
+    "category": "program",
+    "tags": ["5x5", "linear progression", "novice strength", "barbell", "squat", "deadlift", "bench"],
+    "content": "5x5 is a novice linear-progression strength program: five sets of five reps on compound barbell lifts (back squat, bench press, barbell row, overhead press, deadlift) three days per week, adding a small fixed load each session while form holds. It exploits rapid novice adaptation to build a base of maximal strength. Progress stalls are handled with deloads; it is not ideal for advanced lifters or conditioning-focused goals.",
+    "source": "General training knowledge (illustrative)"
+  },
+  {
+    "id": "doc_531",
+    "title": "Wendler 5/3/1",
+    "category": "program",
+    "tags": ["5/3/1", "wendler", "percentage based", "training max", "intermediate strength", "waves"],
+    "content": "5/3/1 is an intermediate strength program built on monthly waves of percentage-based main-lift work computed from a conservative training max (90% of a true max). Each week targets 5s, 3s, then 5/3/1 singles, followed by assistance work for hypertrophy and weak points. It trades fast linear gains for sustainable long-term progression and built-in fatigue management.",
+    "source": "General training knowledge (illustrative)"
+  },
+  {
+    "id": "doc_crossfit",
+    "title": "CrossFit",
+    "category": "program",
+    "tags": ["crossfit", "wod", "metcon", "amrap", "emom", "gpp", "functional fitness", "high intensity"],
+    "content": "CrossFit is constantly varied functional movement performed at high intensity, programmed as daily workouts (WODs) often scored as AMRAPs, EMOMs, or for-time metcons. It targets broad General Physical Preparedness across strength, power, and conditioning. Strengths are work capacity and variety; risks are technique breakdown under fatigue, so scaling and movement quality matter, especially around injuries.",
+    "source": "General training knowledge (illustrative)"
+  },
+  {
+    "id": "doc_hyrox",
+    "title": "HYROX",
+    "category": "competition",
+    "tags": ["hyrox", "hybrid", "race", "sled push", "sled pull", "ski erg", "wall balls", "farmers carry", "burpee broad jump", "row", "sandbag lunge"],
+    "content": "HYROX is a standardized fitness race: 8 x 1 km runs, each followed by a functional station - ski erg, sled push, sled pull, burpee broad jumps, rowing, farmers carry, sandbag lunges, and wall balls. It rewards hybrid fitness: a strong aerobic engine plus muscular endurance under fatigue. Preparation blends Zone 2 base, threshold running, and compromised-running intervals paired with the specific stations (carries, sled work, wall balls).",
+    "source": "General training knowledge (illustrative)"
+  },
+  {
+    "id": "doc_tactical_games",
+    "title": "Tactical Games",
+    "category": "competition",
+    "tags": ["tactical games", "tactical fitness", "military", "law enforcement", "work capacity under load", "rucking"],
+    "content": "The Tactical Games is a competition format that blends functional fitness with marksmanship and tactical tasks, modeled on military and law-enforcement demands. Athletes move under load, perform work-capacity efforts, and shoot accurately while fatigued. Preparation emphasizes mixed-modal conditioning, rucking and load carriage, grip and posterior-chain durability, and the ability to down-regulate heart rate quickly for accuracy.",
+    "source": "General training knowledge (illustrative)"
+  },
+  {
+    "id": "doc_tb12",
+    "title": "TB12 Method",
+    "category": "recovery",
+    "tags": ["tb12", "tom brady", "pliability", "bands", "hydration", "longevity", "recovery"],
+    "content": "The TB12 Method emphasizes muscle 'pliability' - targeted deep-force soft-tissue work paired with band-based functional resistance - alongside hydration, anti-inflammatory nutrition, and sustained sub-maximal training for longevity and durability. The claim is that supple, well-conditioned muscle resists injury and recovers faster. Evidence for the specific 'pliability' mechanism is limited, but the broader emphasis on soft-tissue care, hydration, and load management is sound.",
+    "source": "General training knowledge (illustrative)"
+  },
+  {
+    "id": "doc_mediterranean",
+    "title": "Mediterranean Diet",
+    "category": "diet",
+    "tags": ["mediterranean diet", "olive oil", "fish", "legumes", "whole grains", "cardiometabolic", "heart health"],
+    "content": "The Mediterranean diet centers on vegetables, fruit, legumes, whole grains, nuts, and olive oil, with fish and seafood regularly, moderate dairy and poultry, and little red or processed meat. It is among the best-evidenced eating patterns for cardiometabolic health and longevity. For athletes it supplies ample carbohydrate for training, healthy fats, and anti-inflammatory polyphenols without rigid restriction.",
+    "source": "General nutrition knowledge (illustrative)"
+  },
+  {
+    "id": "doc_keto",
+    "title": "Ketogenic Diet",
+    "category": "diet",
+    "tags": ["keto", "ketogenic", "low carb", "high fat", "ketosis", "fat adaptation"],
+    "content": "A ketogenic diet restricts carbohydrate to roughly under 50 g per day with high fat and moderate protein, shifting the body toward burning ketones for fuel (nutritional ketosis). It can aid satiety, weight loss, and steady energy, and works well for low-intensity aerobic work once fat-adapted. The main caveat for athletes is reduced performance in high-intensity, glycolytic efforts (sprints, heavy metcons) where carbohydrate availability matters.",
+    "source": "General nutrition knowledge (illustrative)"
+  },
+  {
+    "id": "doc_protein",
+    "title": "Protein Intake for Muscle",
+    "category": "diet",
+    "tags": ["protein", "muscle protein synthesis", "hypertrophy", "grams per kg", "recovery"],
+    "content": "For building or maintaining muscle, most evidence supports roughly 1.6-2.2 g of protein per kg of bodyweight per day, distributed across 3-5 meals of about 0.3-0.4 g/kg each to maximize muscle protein synthesis. Higher ends help during fat loss or heavy training to preserve lean mass. Total daily intake matters most; precise timing is secondary.",
+    "source": "General nutrition knowledge (illustrative)"
+  },
+  {
+    "id": "doc_rpe_rir",
+    "title": "RPE and RIR Autoregulation",
+    "category": "program",
+    "tags": ["rpe", "rir", "reps in reserve", "autoregulation", "intensity", "fatigue management"],
+    "content": "RPE (rate of perceived exertion, often a 1-10 scale) and RIR (reps in reserve) are autoregulation tools that set intensity by how hard a set feels rather than a fixed percentage. An RPE 8 set leaves about 2 reps in reserve. They let load track daily readiness - backing off when fatigued, pushing when fresh - which is especially useful around injuries or poor sleep.",
+    "source": "General training knowledge (illustrative)"
+  },
+  {
+    "id": "doc_deload",
+    "title": "Deload Weeks",
+    "category": "recovery",
+    "tags": ["deload", "recovery week", "supercompensation", "fatigue", "tapering"],
+    "content": "A deload is a planned week of reduced volume and/or intensity (commonly every 4-6 weeks, or when fatigue accumulates) that lets accumulated fatigue dissipate so fitness can express through supercompensation. Typical approaches cut working sets, drop load to ~60-70%, or both, while keeping movement patterns. It protects against overuse injury and plateaus and is particularly valuable during injury rehab.",
+    "source": "General training knowledge (illustrative)"
+  }
+]

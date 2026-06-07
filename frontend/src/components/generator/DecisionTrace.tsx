@@ -27,8 +27,13 @@ const STEP_LABELS: Record<string, string> = {
   part_of_traversal:       "SNOMED part-of traversal",
   movement_type_exclusion: "Movement-type exclusion",
   equipment_gate:          "Equipment gate",
-  llm_structuring:         "LLM structuring (3 variants)",
+  llm_structuring:         "LLM structuring",
 };
+
+/** Format a phase wall-clock time for the tiny in-trace timing line. */
+function formatDuration(ms: number): string {
+  return ms >= 1000 ? `${(ms / 1000).toFixed(2)} s` : `${ms.toFixed(1)} ms`;
+}
 
 const KIND_BADGE: Record<"deterministic" | "llm", string> = {
   deterministic: "bg-slate-100 text-slate-600",
@@ -102,6 +107,13 @@ function StepRow({ step, index }: StepRowProps) {
         <div className="border-t border-slate-100 px-4 py-4 space-y-4">
           {/* Detail */}
           <p className="text-xs text-slate-600 leading-relaxed">{step.detail}</p>
+
+          {/* Phase wall-clock time — very small, expanded view only */}
+          {step.duration_ms != null && (
+            <p className="text-[10px] text-slate-400 tabular-nums -mt-2">
+              phase time · {formatDuration(step.duration_ms)}
+            </p>
+          )}
 
           <div className="grid grid-cols-2 gap-4">
             {/* Inputs */}

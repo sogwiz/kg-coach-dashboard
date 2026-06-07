@@ -23,9 +23,10 @@ Three variant profiles (always produced):
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, AsyncIterator
 
 from langchain_core.language_models import BaseChatModel
 
@@ -87,6 +88,15 @@ class GeneratorInput:
     prompt: str
     time_window_minutes: int
     member_id: str
+    # Regenerate support: when set, the LLM is asked to produce a fresh
+    # variation that differs from this summary of the previously generated plan.
+    prior_plan_summary: str | None = None
+    # Optional natural-language tweak applied on regenerate (e.g. "more posterior
+    # chain", "swap in kettlebells"). Appended to the structuring intent.
+    adjustment: str | None = None
+    # Generation engine: "hybrid" (deterministic assembler + narrow LLM
+    # narration — fast, default) or "llm" (LLM structures the whole plan).
+    engine: str = "hybrid"
 
 
 @dataclass
@@ -253,6 +263,7 @@ async def generate_workout(
             from app.api.routes.injury import _promote_injury
             injury = _promote_injury(first_raw, member.profile.id)
 
+    _t_filter = time.perf_counter()
     if injury is not None:
         trace = conditional_safety_filter(
             candidates=candidates,
@@ -285,11 +296,18 @@ async def generate_workout(
         )
 
     safe_exercises = trace.safe
+    filter_ms = (time.perf_counter() - _t_filter) * 1000.0
 
     # ------------------------------------------------------------------
-    # 4. LLM structures the safe set into 3 variants concurrently
+    # 4. LLM structures the safe set into ONE plan
+    #
+    # Single variant: the coach's free-text prompt already determines the
+    # modality, so we make ONE structuring call (not three). The plan reports
+    # its own strength/conditioning/mobility stimulus distribution, which the
+    # UI renders as thermometer gauges.
     # ------------------------------------------------------------------
     from app.generator.llm import structure_plan
+    from app.observability.tracing import tracing_config
 
     # Build a plain-language injury context string for the LLM prompt
     injury_context_str: str = "none"
@@ -306,36 +324,62 @@ async def generate_workout(
         else:
             injury_context_str = f"{injury.diagnosis} at {injury.joint} ({phase_val} phase)"
 
-    async def _structure_variant(
-        variant_id: str,
-        label: str,
-        optimizes_for: str,
-    ) -> WorkoutVariant:
-        """Structure one variant using asyncio thread executor for blocking LLM call."""
-        from app.observability.tracing import tracing_config
-
-        # Build a variant-specific intent string
-        variant_intent = _build_variant_intent(
-            coach_prompt=input.prompt,
-            variant_id=variant_id,
-            label=label,
-            optimizes_for=optimizes_for,
+    # Compose the structuring intent: coach prompt + optional regenerate context.
+    intent = input.prompt
+    if input.prior_plan_summary:
+        intent = (
+            f"{input.prompt}\n\n"
+            "REGENERATE — produce a FRESH variation that is meaningfully different "
+            "from the previous session below: vary exercise selection, ordering, "
+            "and set/rep schemes while honoring the same intent, time window, and "
+            "safety constraints.\n"
+            f"Previous session:\n{input.prior_plan_summary}"
         )
+    if input.adjustment:
+        intent = f"{intent}\n\nCoach adjustment: {input.adjustment}"
 
-        # Build the tracing config for this variant's LLM call
-        run_cfg = tracing_config(
-            "structure_plan",
-            member_id=input.member_id,
-            variant_id=variant_id,
-            prompt=input.prompt,
+    run_cfg = tracing_config(
+        "structure_plan",
+        member_id=input.member_id,
+        variant_id="primary",
+        prompt=input.prompt,
+    )
+
+    _t_llm = time.perf_counter()
+    loop = asyncio.get_event_loop()
+
+    if input.engine == "hybrid":
+        # HYBRID: deterministic assembler builds the structure + per-exercise
+        # rationale + stimulus distribution (instant); a narrow LLM call writes
+        # only the four session-level prose fields. Falls back to a templated
+        # narration when no LLM is available.
+        from app.generator.assembler import assemble_plan
+        from app.generator.narrate import narrate_plan, templated_narration
+
+        plan = assemble_plan(
+            safe_exercises=safe_exercises,
+            prompt=intent,
+            time_minutes=input.time_window_minutes,
+            load_tolerance_pct=trace.load_tolerance_pct,
+            injury=injury,
         )
-
-        loop = asyncio.get_event_loop()
-        plan: WorkoutPlan = await loop.run_in_executor(
+        try:
+            narration = await narrate_plan(
+                plan, intent, injury_context_str, llm, run_cfg
+            )
+        except Exception:
+            narration = templated_narration(plan, intent)
+        plan.stimulus = narration.stimulus or plan.stimulus
+        plan.target_adaptation = narration.target_adaptation or plan.target_adaptation
+        plan.design_rationale = narration.design_rationale or plan.design_rationale
+        plan.sequence_logic = narration.sequence_logic or plan.sequence_logic
+    else:
+        # LLM: the model structures the entire plan (richer, slower).
+        plan = await loop.run_in_executor(
             None,
             lambda: structure_plan(
                 safe_exercises=safe_exercises,
-                intent=variant_intent,
+                intent=intent,
                 time_minutes=input.time_window_minutes,
                 load_tolerance_pct=trace.load_tolerance_pct,
                 llm=llm,
@@ -344,37 +388,31 @@ async def generate_workout(
             ),
         )
 
-        prov = Provenance(
-            generated_at=started_at,
-            prompt=input.prompt,
-            time_window_minutes=input.time_window_minutes,
-            injury_state_used=trace.injury_state_used,
-            healing_phase=(
-                injury.computed_phase().value if injury is not None else None
-            ),
-            load_tolerance_pct=trace.load_tolerance_pct,
-            stale_check_in=trace.stale_check_in,
-            exercises_filtered_out=[
-                {"name": ex.name, "id": ex.id, "reason": reason}
-                for ex, reason in trace.removed
-            ],
-            equipment_available=sorted(available_equipment),
-        )
+    llm_ms = (time.perf_counter() - _t_llm) * 1000.0
 
-        return WorkoutVariant(
-            variant_id=variant_id,
-            label=label,
-            optimizes_for=optimizes_for,
-            plan=plan,
-            provenance=prov,
-        )
+    prov = Provenance(
+        generated_at=started_at,
+        prompt=input.prompt,
+        time_window_minutes=input.time_window_minutes,
+        injury_state_used=trace.injury_state_used,
+        healing_phase=(injury.computed_phase().value if injury is not None else None),
+        load_tolerance_pct=trace.load_tolerance_pct,
+        stale_check_in=trace.stale_check_in,
+        exercises_filtered_out=[
+            {"name": ex.name, "id": ex.id, "reason": reason}
+            for ex, reason in trace.removed
+        ],
+        equipment_available=sorted(available_equipment),
+    )
 
-    # Run all three variant structuring calls concurrently
-    variant_tasks = [
-        _structure_variant(vid, label, opt_for)
-        for vid, label, opt_for in VARIANT_PROFILES
-    ]
-    variants: list[WorkoutVariant] = list(await asyncio.gather(*variant_tasks))
+    variant = WorkoutVariant(
+        variant_id="primary",
+        label="Session Plan",
+        optimizes_for=(plan.stimulus or input.prompt),
+        plan=plan,
+        provenance=prov,
+    )
+    variants: list[WorkoutVariant] = [variant]
 
     # ------------------------------------------------------------------
     # 5. Build the in-app decision trace (Phase 7 observability)
@@ -412,7 +450,11 @@ async def generate_workout(
         safe_count=len(trace.safe),
         removed_count=len(trace.removed),
         removed_exercises=removed_exercises_list,
-        variant_ids=[vid for vid, _, _ in VARIANT_PROFILES],
+        variant_ids=["primary"],
+        timings={
+            "movement_type_exclusion": filter_ms,
+            "llm_structuring": llm_ms,
+        },
     )
 
     # ------------------------------------------------------------------
@@ -457,6 +499,101 @@ async def generate_workout(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _compute_safe_preview(member: MemberContext, kg: MovementKG) -> tuple[int, int, float]:
+    """
+    Run ONLY the deterministic safety filter for a quick streaming preview.
+
+    Returns (safe_count, removed_count, filter_ms). Read-only and cheap — mirrors
+    the filter stage of generate_workout() so the coach sees the safe/filtered
+    counts within ~1s, before the LLM call. Does not affect generate_workout().
+    """
+    available_equipment: set[str] = set(member.equipment_available)
+    dislikes: set[str] = set(member.preferences.dislikes)
+    candidates = kg.all_exercises()
+
+    injury: Injury | None = None
+    if member.injuries:
+        from app.api.routes.injury import _load_injury, _promote_injury
+
+        first_raw = member.injuries[0]
+        try:
+            injury = _load_injury(member.profile.id, first_raw.id)
+        except Exception:
+            try:
+                injury = _promote_injury(first_raw, member.profile.id)
+            except Exception:
+                injury = None
+
+    t0 = time.perf_counter()
+    if injury is not None:
+        trace = conditional_safety_filter(
+            candidates=candidates,
+            injury=injury,
+            available_equipment=available_equipment,
+            excluded_ids=set(),
+            dislikes=dislikes,
+            kg=kg,
+        )
+        safe_n, removed_n = len(trace.safe), len(trace.removed)
+    else:
+        from app.graph.safety_filter import safety_filter
+
+        base = safety_filter(
+            candidates=candidates,
+            injured_joints=[],
+            available_equipment=available_equipment,
+            excluded_ids=set(),
+            dislikes=dislikes,
+            kg=kg,
+        )
+        safe_n, removed_n = len(base.safe), len(base.removed)
+    return safe_n, removed_n, (time.perf_counter() - t0) * 1000.0
+
+
+async def generate_workout_stream(
+    input: GeneratorInput,
+    kg: MovementKG,
+    member: MemberContext,
+    llm: BaseChatModel,
+) -> AsyncIterator[dict | GeneratorOutput]:
+    """
+    Streaming variant of generate_workout.
+
+    Yields progress status dicts for perceived speed, then the authoritative
+    GeneratorOutput as the final item:
+      {"stage": "resolve"}
+      {"stage": "safety", "safe_count": N, "removed_count": M, "filter_ms": X}
+      {"stage": "structuring"}
+      <GeneratorOutput>          # final
+
+    The deterministic stages complete in ~1s so the coach sees the safety result
+    immediately; the plan arrives when the single LLM call finishes. The final
+    result comes from the unchanged generate_workout(), so behavior is identical.
+    """
+    yield {"stage": "resolve", "prompt": input.prompt}
+
+    try:
+        loop = asyncio.get_event_loop()
+        safe_n, removed_n, filter_ms = await loop.run_in_executor(
+            None, lambda: _compute_safe_preview(member, kg)
+        )
+        yield {
+            "stage": "safety",
+            "safe_count": safe_n,
+            "removed_count": removed_n,
+            "filter_ms": round(filter_ms, 1),
+        }
+    except Exception:
+        yield {"stage": "safety"}
+
+    # Engine-aware status: hybrid assembles deterministically then narrates;
+    # the llm engine structures the whole plan.
+    yield {"stage": "structuring", "engine": input.engine}
+
+    output = await generate_workout(input=input, kg=kg, member=member, llm=llm)
+    yield output
 
 
 def _build_variant_intent(

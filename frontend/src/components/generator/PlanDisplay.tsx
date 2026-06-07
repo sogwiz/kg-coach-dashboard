@@ -190,48 +190,45 @@ interface PlanDisplayProps {
 export function PlanDisplay({ plan, loadCapPct }: PlanDisplayProps) {
   return (
     <div className="space-y-6">
-      {/* Session-level narrative header */}
-      <div className="rounded-xl border border-indigo-100 bg-indigo-50 p-4 space-y-3">
-        {plan.stimulus && (
-          <div>
-            <span className="text-xs font-bold text-indigo-500 uppercase tracking-wide">
-              Stimulus
-            </span>
-            <p className="text-sm text-indigo-800 font-medium mt-0.5">{plan.stimulus}</p>
+      {/* Why this session was designed this way */}
+      <div className="rounded-2xl border border-line bg-sand/40 p-5 space-y-4">
+        <p className="eyebrow text-clay">Why this session</p>
+
+        {/* The prominent design-rationale paragraph */}
+        {plan.design_rationale && (
+          <p className="text-sm leading-relaxed text-ink">{plan.design_rationale}</p>
+        )}
+
+        {(plan.stimulus || plan.target_adaptation) && (
+          <div className="grid gap-3 sm:grid-cols-2">
+            {plan.stimulus && (
+              <div>
+                <span className="eyebrow">Stimulus</span>
+                <p className="mt-0.5 text-sm font-medium text-ink">{plan.stimulus}</p>
+              </div>
+            )}
+            {plan.target_adaptation && (
+              <div>
+                <span className="eyebrow">Target adaptation</span>
+                <p className="mt-0.5 text-sm text-ink-soft">{plan.target_adaptation}</p>
+              </div>
+            )}
           </div>
         )}
-        {plan.target_adaptation && (
-          <div>
-            <span className="text-xs font-bold text-indigo-500 uppercase tracking-wide">
-              Target adaptation
-            </span>
-            <p className="text-sm text-indigo-800 mt-0.5">{plan.target_adaptation}</p>
-          </div>
-        )}
+
         {plan.sequence_logic && (
-          <div>
-            <span className="text-xs font-bold text-indigo-500 uppercase tracking-wide">
-              Ordering strategy
-            </span>
-            <p className="text-sm text-indigo-700 mt-0.5 leading-relaxed">
+          <div className="border-t border-line pt-3">
+            <span className="eyebrow">Ordering strategy</span>
+            <p className="mt-0.5 text-sm leading-relaxed text-ink-soft">
               {plan.sequence_logic}
             </p>
           </div>
         )}
-        {plan.design_rationale && (
-          <div>
-            <span className="text-xs font-bold text-indigo-500 uppercase tracking-wide">
-              Design rationale
-            </span>
-            <p className="text-sm text-indigo-700 mt-0.5 leading-relaxed">
-              {plan.design_rationale}
-            </p>
-          </div>
-        )}
-        <p className="text-xs text-indigo-500">
-          Estimated duration: <strong>{plan.total_minutes} min</strong>
+
+        <p className="text-xs text-ink-faint">
+          Estimated duration: <strong className="text-ink-soft">{plan.total_minutes} min</strong>
           {loadCapPct < 1.0 && (
-            <span className="ml-3 inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-700 px-2 py-0.5 text-xs font-medium">
+            <span className="ml-3 inline-flex items-center gap-1 rounded-full bg-clay/10 px-2 py-0.5 text-xs font-medium text-clay">
               Intensity capped at {Math.round(loadCapPct * 100)}%
             </span>
           )}

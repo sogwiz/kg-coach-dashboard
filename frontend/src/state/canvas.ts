@@ -16,12 +16,23 @@ import type { PlannedExercise } from "../lib/api";
 // Canvas node — one exercise on the canvas
 // ---------------------------------------------------------------------------
 
+/** The three session columns of the calendar-grid canvas. */
+export type CanvasSection = "warmup" | "main" | "cooldown";
+
+export const CANVAS_SECTIONS: { id: CanvasSection; label: string }[] = [
+  { id: "warmup", label: "Warmup / Mobility" },
+  { id: "main", label: "Main" },
+  { id: "cooldown", label: "Cooldown" },
+];
+
 export interface CanvasNode {
   /** Unique id within the canvas (not the exercise id — allows duplicates) */
   canvasId: string;
   /** Catalog exercise id */
   exerciseId: string;
   name: string;
+  /** Which column the exercise lives in */
+  section: CanvasSection;
   /** Editable coach annotations */
   stimulus: string;
   intensity: string;
@@ -73,11 +84,37 @@ export function canvasUpdateNode(
   notify();
 }
 
-export function canvasMoveNode(fromIdx: number, toIdx: number): void {
-  if (fromIdx === toIdx) return;
+/** Move a node into a section, appended after the last node of that section. */
+export function canvasMoveToSection(canvasId: string, section: CanvasSection): void {
+  const node = _nodes.find((n) => n.canvasId === canvasId);
+  if (!node || node.section === section) return;
+  const updated: CanvasNode = { ...node, section };
+  const rest = _nodes.filter((n) => n.canvasId !== canvasId);
+  // Insert after the last node already in the target section
+  let lastIdx = -1;
+  rest.forEach((n, i) => {
+    if (n.section === section) lastIdx = i;
+  });
+  rest.splice(lastIdx + 1, 0, updated);
+  _nodes = rest;
+  notify();
+}
+
+/** Reorder a node up/down within its OWN section (dir: -1 up, +1 down). */
+export function canvasReorderInSection(canvasId: string, dir: -1 | 1): void {
+  const node = _nodes.find((n) => n.canvasId === canvasId);
+  if (!node) return;
+  // Indices of same-section nodes, in flat order
+  const sameSection = _nodes
+    .map((n, i) => ({ n, i }))
+    .filter((x) => x.n.section === node.section);
+  const pos = sameSection.findIndex((x) => x.n.canvasId === canvasId);
+  const swapWith = sameSection[pos + dir];
+  if (!swapWith) return;
   const arr = [..._nodes];
-  const [item] = arr.splice(fromIdx, 1);
-  arr.splice(toIdx, 0, item);
+  const a = sameSection[pos].i;
+  const b = swapWith.i;
+  [arr[a], arr[b]] = [arr[b], arr[a]];
   _nodes = arr;
   notify();
 }
@@ -88,20 +125,34 @@ export function canvasClear(): void {
 }
 
 /**
- * Pre-populate the canvas from a generated variant's exercises.
- * Replaces current canvas contents.
+ * Pre-populate the canvas from a generated plan, mapping each section to its
+ * column. Replaces current canvas contents.
  */
-export function pushToCanvas(exercises: PlannedExercise[]): void {
-  _nodes = exercises.map((ex) => ({
-    canvasId: newCanvasId(),
-    exerciseId: ex.exercise_id,
-    name: ex.name,
-    stimulus: ex.rationale ?? "",
-    intensity: "",
-    setsReps: ex.reps != null ? `${ex.sets} x ${ex.reps}` : `${ex.sets} sets`,
-    rest: ex.rest_seconds > 0 ? `${ex.rest_seconds}s` : "",
-    notes: ex.sequencing_rationale ?? "",
-  }));
+export function pushToCanvas(plan: {
+  warmup: PlannedExercise[];
+  main: PlannedExercise[];
+  cooldown: PlannedExercise[];
+}): void {
+  const fromSection = (exs: PlannedExercise[], section: CanvasSection): CanvasNode[] =>
+    [...exs]
+      .sort((a, b) => a.order - b.order)
+      .map((ex) => ({
+        canvasId: newCanvasId(),
+        exerciseId: ex.exercise_id,
+        name: ex.name,
+        section,
+        stimulus: ex.rationale ?? "",
+        intensity: "",
+        setsReps: ex.reps != null ? `${ex.sets} x ${ex.reps}` : `${ex.sets} sets`,
+        rest: ex.rest_seconds > 0 ? `${ex.rest_seconds}s` : "",
+        notes: ex.sequencing_rationale ?? "",
+      }));
+
+  _nodes = [
+    ...fromSection(plan.warmup, "warmup"),
+    ...fromSection(plan.main, "main"),
+    ...fromSection(plan.cooldown, "cooldown"),
+  ];
   notify();
 }
 

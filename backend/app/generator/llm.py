@@ -31,8 +31,16 @@ from app.models.plan import PlannedExercise, WorkoutPlan
 # LLM factory
 # ---------------------------------------------------------------------------
 
-_MODEL_NAME = "claude-haiku-4-5"
+_MODEL_NAME = "claude-haiku-4-5"  # already Anthropic's fastest tier
 _TEMPERATURE = 0.3
+# Ceiling on generated tokens — prevents a pathologically long plan from
+# running away. The real latency win comes from the terser prompt + candidate
+# trim below (latency scales with tokens *generated*, not this ceiling).
+_MAX_TOKENS = 3000
+# Cap how many safe exercises the LLM sees. Fewer input tokens + a smaller
+# decision space = faster structuring. Safety is unaffected — the set is
+# already filtered; we just rank within it by priority tier.
+_MAX_CANDIDATES = 32
 
 
 def get_structuring_llm() -> BaseChatModel:
@@ -56,6 +64,7 @@ def get_structuring_llm() -> BaseChatModel:
     return ChatAnthropic(  # type: ignore[call-arg]
         model=_MODEL_NAME,
         temperature=_TEMPERATURE,
+        max_tokens=_MAX_TOKENS,
         api_key=api_key,
     )
 
@@ -136,10 +145,40 @@ Your job:
      work is placed last to avoid pre-fatiguing the prime movers needed for
      strength sets."
 
+9. Fill `stimulus_distribution`: three INDEPENDENT integer readings (0-100)
+   estimating how strongly THIS session leans toward each stimulus:
+   - strength      — mechanical tension / heavy loading / hypertrophy
+   - conditioning  — metabolic / cardiovascular / density work
+   - mobility      — ROM / activation / recovery / low systemic load
+   These are independent gauges (they need NOT sum to 100). Judge from the
+   actual exercises, rep schemes, rest, and roles you assigned. A heavy
+   lower-body strength day might be {{strength:85, conditioning:25, mobility:40}};
+   a HYROX circuit {{strength:45, conditioning:90, mobility:20}}; a recovery
+   flow {{strength:10, conditioning:15, mobility:90}}.
+
+LENGTH GUIDANCE:
+- Keep the plan TIGHT: warmup 2-3, main 4-6, cooldown 1-2 exercises. Add more
+  ONLY if the time window clearly demands it (e.g. 75+ min).
+- Per-exercise fields stay terse (this is the bulk of the output):
+    rationale: ONE short clause, <= 12 words.
+    sequencing_rationale: ONE sentence, <= 16 words.
+- stimulus and target_adaptation: <= 12 words each.
+- BUT the two session-level "why" fields are the coach-facing explanation —
+  make them SUBSTANTIVE (they cost few tokens, so do not skimp):
+    design_rationale: a clear PARAGRAPH (3-4 sentences) explaining HOW the
+      coach's prompt, the member's injury state, the load-tolerance cap, and the
+      time window shaped this specific design — what was prioritized and why.
+    sequence_logic: ONE-TWO sentences on the ordering principle only. Do NOT
+      repeat the design_rationale — just the order logic (e.g. compounds while
+      fresh, injury-protective activation before the movement it protects,
+      conditioning after strength).
+Be concrete, not padded.
+
 Return ONLY the structured JSON matching the WorkoutPlan schema.
 Do not invent exercises — use only the exercises from the provided list.
 Populate ALL fields: order, sequencing_role, sequencing_rationale, rationale,
-sequence_logic, stimulus, target_adaptation, design_rationale.
+sequence_logic, stimulus, target_adaptation, design_rationale,
+stimulus_distribution.
 """
 
 _USER_TEMPLATE = """\
@@ -151,6 +190,24 @@ Member injury context: {injury_context}
 Available safe exercises:
 {exercise_list}
 """
+
+
+def _select_candidates(safe_exercises: list[Exercise], max_n: int) -> list[Exercise]:
+    """
+    Rank the safe pool and keep the top `max_n` for the LLM prompt.
+
+    Ranking is by priority_tier (lower = higher priority), then name for a
+    stable order. A no-op when the pool is already small. This cuts input
+    tokens and the model's decision space without affecting safety — the pool
+    is already post-filter.
+    """
+    if len(safe_exercises) <= max_n:
+        return safe_exercises
+    ranked = sorted(
+        safe_exercises,
+        key=lambda e: (getattr(e, "priority_tier", 2), e.name),
+    )
+    return ranked[:max_n]
 
 
 def structure_plan(
@@ -194,9 +251,14 @@ def structure_plan(
     """
     from langchain_core.messages import HumanMessage, SystemMessage
 
+    # Trim the candidate set to the highest-priority exercises so the LLM reads
+    # fewer tokens and reasons over a smaller space. Safety is unaffected — the
+    # set is already filtered; this only ranks within the safe pool.
+    candidates = _select_candidates(safe_exercises, _MAX_CANDIDATES)
+
     # Build the exercise list for the prompt
     exercise_lines: list[str] = []
-    for ex in safe_exercises:
+    for ex in candidates:
         line = (
             f"- id={ex.id!r} name={ex.name!r} "
             f"patterns={ex.movement_patterns!r} "

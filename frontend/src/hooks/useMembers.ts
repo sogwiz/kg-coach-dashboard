@@ -5,13 +5,14 @@
  * source of truth used by all other hooks and panels.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { fetchMembers } from "../lib/api";
 import { useActiveMember } from "../state/activeMember";
 
 interface UseMembersResult {
   isLoading: boolean;
   error: string | null;
+  refresh: () => Promise<void>;
 }
 
 export function useMembers(): UseMembersResult {
@@ -19,28 +20,26 @@ export function useMembers(): UseMembersResult {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
+  const loadMembers = useCallback(async () => {
     setIsLoading(true);
-    fetchMembers()
-      .then((list) => {
-        if (!cancelled) {
-          setMembers(list);
-          setError(null);
-        }
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : "Failed to load members");
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setIsLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
+    try {
+      const list = await fetchMembers();
+      setMembers(list);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load members");
+    } finally {
+      setIsLoading(false);
+    }
   }, [setMembers]);
 
-  return { isLoading, error };
+  useEffect(() => {
+    loadMembers();
+  }, [loadMembers]);
+
+  const refresh = useCallback(async () => {
+    await loadMembers();
+  }, [loadMembers]);
+
+  return { isLoading, error, refresh };
 }

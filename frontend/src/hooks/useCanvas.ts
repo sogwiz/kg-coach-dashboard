@@ -1,8 +1,8 @@
 /**
  * useCanvas — React hook that subscribes to the shared canvas store.
  *
- * Returns the current ordered list of CanvasNodes and all mutation helpers.
- * Components re-render whenever the canvas changes.
+ * Returns the current nodes (across all 3 sections) and section-aware mutation
+ * helpers. Components re-render whenever the canvas changes.
  */
 
 import { useSyncExternalStore, useCallback } from "react";
@@ -12,9 +12,11 @@ import {
   canvasAddNode,
   canvasRemoveNode,
   canvasUpdateNode,
-  canvasMoveNode,
+  canvasMoveToSection,
+  canvasReorderInSection,
   canvasClear,
   type CanvasNode,
+  type CanvasSection,
 } from "../state/canvas";
 
 interface UseCanvasResult {
@@ -25,7 +27,8 @@ interface UseCanvasResult {
     canvasId: string,
     patch: Partial<Omit<CanvasNode, "canvasId" | "exerciseId">>
   ) => void;
-  moveNode: (fromIdx: number, toIdx: number) => void;
+  moveToSection: (canvasId: string, section: CanvasSection) => void;
+  reorderInSection: (canvasId: string, dir: -1 | 1) => void;
   clearCanvas: () => void;
 }
 
@@ -36,9 +39,7 @@ export function useCanvas(): UseCanvasResult {
     (node: Omit<CanvasNode, "canvasId">) => canvasAddNode(node),
     []
   );
-
   const removeNode = useCallback((id: string) => canvasRemoveNode(id), []);
-
   const updateNode = useCallback(
     (
       id: string,
@@ -46,13 +47,23 @@ export function useCanvas(): UseCanvasResult {
     ) => canvasUpdateNode(id, patch),
     []
   );
-
-  const moveNode = useCallback(
-    (from: number, to: number) => canvasMoveNode(from, to),
+  const moveToSection = useCallback(
+    (id: string, section: CanvasSection) => canvasMoveToSection(id, section),
     []
   );
-
+  const reorderInSection = useCallback(
+    (id: string, dir: -1 | 1) => canvasReorderInSection(id, dir),
+    []
+  );
   const clearCanvas = useCallback(() => canvasClear(), []);
 
-  return { nodes, addNode, removeNode, updateNode, moveNode, clearCanvas };
+  return {
+    nodes,
+    addNode,
+    removeNode,
+    updateNode,
+    moveToSection,
+    reorderInSection,
+    clearCanvas,
+  };
 }

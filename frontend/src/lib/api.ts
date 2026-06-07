@@ -31,6 +31,7 @@ export interface MemberSummary {
   churn_risk_level: string;
   adherence_trend: string;
   active_injury: string | null;
+  workout_sent_today: boolean;
 }
 
 export interface MorningTask {
@@ -151,11 +152,18 @@ export interface PlannedExercise {
   sequencing_role: SequencingRole;
 }
 
+export interface StimulusDistribution {
+  strength: number; // 0-100
+  conditioning: number; // 0-100
+  mobility: number; // 0-100
+}
+
 export interface WorkoutPlan {
   warmup: PlannedExercise[];
   main: PlannedExercise[];
   cooldown: PlannedExercise[];
   total_minutes: number;
+  stimulus_distribution?: StimulusDistribution;
   stimulus: string;
   target_adaptation: string;
   design_rationale: string;
@@ -197,6 +205,7 @@ export interface DecisionStep {
   inputs: Record<string, unknown>;
   outputs: Record<string, unknown>;
   kind: "deterministic" | "llm";
+  duration_ms?: number | null;
 }
 
 export interface GeneratorOutput {
@@ -338,9 +347,149 @@ export async function postGenerateSelect(
   });
 }
 
+/**
+ * Regenerate the member's current plan as a fresh, distinct variation. The
+ * backend feeds the previous session to the LLM so the result differs while
+ * honoring the same prompt + time window. Optional `adjustment` applies a tweak
+ * (e.g. "more posterior chain", "no barbell").
+ */
+export async function postRegenerate(
+  memberId: string,
+  adjustment?: string
+): Promise<GeneratorOutput> {
+  return apiFetch<GeneratorOutput>("/api/generate/regenerate", {
+    method: "POST",
+    body: JSON.stringify({
+      member_id: memberId,
+      adjustment: adjustment || undefined,
+    }),
+  });
+}
+
+export interface GenStatusEvent {
+  stage: "resolve" | "safety" | "structuring";
+  safe_count?: number;
+  removed_count?: number;
+  filter_ms?: number;
+  engine?: "hybrid" | "llm";
+}
+
+/**
+ * Streaming generate — POST /api/generate/stream returns newline-delimited JSON
+ * events. `onEvent` fires per event ({type:"status"|"complete"|"error", ...}).
+ */
+export async function streamGenerate(
+  prompt: string,
+  minutes: number,
+  memberId: string,
+  onEvent: (ev: Record<string, unknown>) => void,
+  engine: "hybrid" | "llm" = "hybrid"
+): Promise<void> {
+  const token = getToken();
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const res = await fetch("/api/generate/stream", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      prompt,
+      time_window_minutes: minutes,
+      member_id: memberId,
+      engine,
+    }),
+  });
+  if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
+
+  const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+  let buf = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += value;
+    let nl: number;
+    while ((nl = buf.indexOf("\n")) >= 0) {
+      const line = buf.slice(0, nl).trim();
+      buf = buf.slice(nl + 1);
+      if (line) {
+        try {
+          onEvent(JSON.parse(line));
+        } catch {
+          /* ignore malformed line */
+        }
+      }
+    }
+  }
+  const tail = buf.trim();
+  if (tail) {
+    try {
+      onEvent(JSON.parse(tail));
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Send workout types + endpoint
+// ---------------------------------------------------------------------------
+
+export interface SendWorkoutRequest {
+  member_id: string;
+  variant_id: string;
+  message?: string;
+}
+
+export interface SendWorkoutResponse {
+  success: boolean;
+  member_id: string;
+  variant_id: string;
+  message: string;
+  sent_at: string;
+}
+
+export interface SendStatusResponse {
+  member_id: string;
+  sent_today: boolean;
+  last_sent: string | null;
+  last_message: string | null;
+}
+
+export async function postSendWorkout(
+  memberId: string,
+  variantId: string,
+  message?: string
+): Promise<SendWorkoutResponse> {
+  return apiFetch<SendWorkoutResponse>("/api/generate/send", {
+    method: "POST",
+    body: JSON.stringify({
+      member_id: memberId,
+      variant_id: variantId,
+      message: message || undefined,
+    }),
+  });
+}
+
+export async function fetchSendStatus(memberId: string): Promise<SendStatusResponse> {
+  return apiFetch<SendStatusResponse>(`/api/generate/send-status/${memberId}`);
+}
+
+export async function fetchPreviewMessage(
+  memberId: string,
+  variantId: string
+): Promise<{ message: string }> {
+  return apiFetch<{ message: string }>(`/api/generate/preview-message?member_id=${memberId}&variant_id=${variantId}`);
+}
+
 // ---------------------------------------------------------------------------
 // Graph types (mirrors backend GraphPayload)
 // ---------------------------------------------------------------------------
+
+export interface ExclusionAttribution {
+  injury: string;       // "left knee — patellofemoral pain syndrome"
+  joint: string;        // injured joint slug
+  reason: string;       // filter reason string
+}
 
 export interface GraphNode {
   id: string;
@@ -348,6 +497,15 @@ export interface GraphNode {
   type: string;         // exercise / muscle / joint / pattern / equipment / injury_concept
   filtered_out: boolean;
   on_filter_path: boolean;
+  excluded_by?: ExclusionAttribution[];
+}
+
+export interface MemberInjury {
+  joint: string;
+  region: string;
+  diagnosis: string;
+  label: string;        // display label
+  healing_phase?: string | null;
 }
 
 export interface GraphEdge {
@@ -362,6 +520,7 @@ export interface GraphPayload {
   nodes: GraphNode[];
   edges: GraphEdge[];
   member_id: string | null;
+  member_injuries?: MemberInjury[];
   filtered_exercise_ids: string[];
   filter_path_node_ids: string[];
 }
@@ -378,12 +537,15 @@ export interface ChatAttachment {
 
 export interface ChatMessage {
   ts: string;
-  from: string;          // "member" | "coach"
+  from: string;          // "member" | "coach" | "system"
   text: string;
   attachments: ChatAttachment[];
   // client-side extra fields for rendering
-  role?: "user" | "assistant";
+  role?: "user" | "assistant" | "event";
   isStreaming?: boolean;
+  // For role === "event": logged activity (e.g. a generated workout) rendered
+  // as a clickable chip in the conversation.
+  event?: { kind: string; prompt?: string; minutes?: number };
 }
 
 // ---------------------------------------------------------------------------
@@ -435,6 +597,39 @@ export async function fetchExercises(params?: {
 }
 
 // ---------------------------------------------------------------------------
+// Canvas synthesis (analyze a coach-built workout)
+// ---------------------------------------------------------------------------
+
+export interface CanvasAnalyzeItem {
+  exercise_id: string;
+  name: string;
+  section: string;
+  sets_reps: string;
+  rest: string;
+  intensity: string;
+}
+
+export interface CanvasAnalysis {
+  total_exercises: number;
+  total_sets: number;
+  per_section: { warmup: number; main: number; cooldown: number };
+  rep_histogram: Record<string, number>;
+  adaptation_scores: Record<string, number>;
+  primary_adaptation: string;
+  primary_label: string;
+  stimulus_distribution: StimulusDistribution;
+  verdict: string;
+  tip: string;
+}
+
+export async function analyzeCanvas(items: CanvasAnalyzeItem[]): Promise<CanvasAnalysis> {
+  return apiFetch<CanvasAnalysis>("/api/canvas/analyze", {
+    method: "POST",
+    body: JSON.stringify({ items }),
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Copilot endpoints
 // ---------------------------------------------------------------------------
 
@@ -465,7 +660,8 @@ export async function postCopilotSync(
 export async function streamCopilot(
   memberId: string,
   message: string,
-  attachments: ChatAttachment[] = []
+  attachments: ChatAttachment[] = [],
+  context?: string
 ): Promise<ReadableStreamDefaultReader<string>> {
   const token = getToken();
   const headers: Record<string, string> = {
@@ -476,7 +672,12 @@ export async function streamCopilot(
   const res = await fetch("/api/copilot/chat", {
     method: "POST",
     headers,
-    body: JSON.stringify({ member_id: memberId, message, attachments }),
+    body: JSON.stringify({
+      member_id: memberId,
+      message,
+      attachments,
+      context: context || undefined,
+    }),
   });
 
   if (!res.ok) {

@@ -1,0 +1,41 @@
+# ── One-command containerized deploy: `docker compose up --build` ────────────
+# Open http://localhost:8080  (host port 8080 chosen to avoid colliding with
+# any local dev server on :5173/:8000).
+#
+# Seed data is baked into the backend image (data/ → /app/data), so the stack
+# is fully self-contained — no external database required.
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    # Reads ANTHROPIC_API_KEY (+ optional LANGCHAIN_* / OPENAI_API_KEY).
+    # Copy .env.example → .env and fill in your key before `up`.
+    env_file:
+      - .env
+    expose:
+      - "8000"
+    # Persist the Hugging Face model cache so all-MiniLM-L6-v2 is downloaded
+    # once on first boot and reused across restarts.
+    volumes:
+      - hf_cache:/opt/hf-cache
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      # Generous window: first boot downloads the embedding model (~30-60s).
+      start_period: 180s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    ports:
+      - "8080:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  hf_cache:

@@ -12,7 +12,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import type { ChatAttachment, ChatMessage } from "../lib/api";
-import { fetchChatHistory, streamCopilot } from "../lib/api";
+import { streamCopilot } from "../lib/api";
 
 export interface UseCopilotResult {
   messages: ChatMessage[];
@@ -20,7 +20,8 @@ export interface UseCopilotResult {
   isLoadingHistory: boolean;
   historyError: string | null;
   llmUnavailable: boolean;
-  send: (text: string, attachments?: ChatAttachment[]) => Promise<void>;
+  send: (text: string, attachments?: ChatAttachment[], context?: string) => Promise<void>;
+  pushEvent: (text: string, event?: { kind: string; prompt?: string; minutes?: number }) => void;
   clearError: () => void;
 }
 
@@ -34,7 +35,10 @@ export function useCopilot(memberId: string | null): UseCopilotResult {
   // Track the member whose history is loaded to avoid double-loading
   const loadedMemberRef = useRef<string | null>(null);
 
-  // Reset on member change
+  // Reset on member change.
+  // NOTE: the Copilot is the trainer↔AI conversation and starts EMPTY. The
+  // trainer↔client message history lives in the separate Client Inbox, not
+  // here — the agent stays aware of it via the chat_history_search tool.
   useEffect(() => {
     if (!memberId) {
       setMessages([]);
@@ -47,28 +51,11 @@ export function useCopilot(memberId: string | null): UseCopilotResult {
     setMessages([]);
     setHistoryError(null);
     setLlmUnavailable(false);
-
-    // Load seed history
-    setIsLoadingHistory(true);
-    fetchChatHistory(memberId)
-      .then((history) => {
-        const withRoles: ChatMessage[] = history.map((msg) => ({
-          ...msg,
-          role: msg.from === "coach" ? ("assistant" as const) : ("user" as const),
-        }));
-        setMessages(withRoles);
-      })
-      .catch((err) => {
-        const msg = err instanceof Error ? err.message : String(err);
-        setHistoryError(`Could not load chat history: ${msg}`);
-      })
-      .finally(() => {
-        setIsLoadingHistory(false);
-      });
+    setIsLoadingHistory(false);
   }, [memberId]);
 
   const send = useCallback(
-    async (text: string, attachments: ChatAttachment[] = []) => {
+    async (text: string, attachments: ChatAttachment[] = [], context?: string) => {
       if (!memberId || isStreaming) return;
 
       // Optimistically add the user message
@@ -95,7 +82,7 @@ export function useCopilot(memberId: string | null): UseCopilotResult {
       setLlmUnavailable(false);
 
       try {
-        const reader = await streamCopilot(memberId, text, attachments);
+        const reader = await streamCopilot(memberId, text, attachments, context);
         let accumulated = "";
 
         while (true) {
@@ -163,6 +150,23 @@ export function useCopilot(memberId: string | null): UseCopilotResult {
     [memberId, isStreaming]
   );
 
+  const pushEvent = useCallback(
+    (text: string, event?: { kind: string; prompt?: string; minutes?: number }) => {
+      setMessages((prev) => [
+        ...prev,
+        {
+          ts: new Date().toISOString(),
+          from: "system",
+          text,
+          attachments: [],
+          role: "event",
+          event,
+        },
+      ]);
+    },
+    []
+  );
+
   const clearError = useCallback(() => {
     setHistoryError(null);
     setLlmUnavailable(false);
@@ -175,6 +179,7 @@ export function useCopilot(memberId: string | null): UseCopilotResult {
     historyError,
     llmUnavailable,
     send,
+    pushEvent,
     clearError,
   };
 }

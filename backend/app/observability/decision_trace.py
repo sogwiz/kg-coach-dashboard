@@ -58,6 +58,10 @@ class DecisionStep:
     kind:
         "deterministic" — pure function, no LLM, fully reproducible.
         "llm"           — calls a language model; output may vary.
+    duration_ms:
+        Wall-clock time spent in this phase, in milliseconds. None when the
+        phase was not individually timed (e.g. sub-millisecond bookkeeping
+        steps). Rendered very small in the expanded decision-trace view.
     """
 
     name: str
@@ -65,6 +69,7 @@ class DecisionStep:
     inputs: dict[str, Any] = field(default_factory=dict)
     outputs: dict[str, Any] = field(default_factory=dict)
     kind: Literal["deterministic", "llm"] = "deterministic"
+    duration_ms: float | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -86,6 +91,7 @@ def build_decision_trace(
     removed_exercises: list[dict],  # [{"name": ..., "reason": ...}]
     variant_ids: list[str],
     langsmith_run_url: str | None = None,
+    timings: dict[str, float] | None = None,
 ) -> list[DecisionStep]:
     """
     Build the ordered decision trace for one generator pipeline run.
@@ -290,10 +296,10 @@ def build_decision_trace(
             name="llm_structuring",
             detail=(
                 f"The LLM receives only the {safe_count} safe exercises and "
-                "structures them into three labeled WorkoutPlan variants "
-                "(strength / conditioning / mobility), assigning sets, reps, "
-                "rest, per-exercise rationale, sequencing roles, and "
-                "session-level stimulus/target_adaptation/design_rationale."
+                "structures them into a single WorkoutPlan — assigning sets, "
+                "reps, rest, per-exercise rationale, sequencing roles, the "
+                "session-level stimulus/target_adaptation/design_rationale, and "
+                "the strength/conditioning/mobility stimulus distribution."
             ),
             inputs={
                 "safe_exercise_count": safe_count,
@@ -303,6 +309,12 @@ def build_decision_trace(
             kind="llm",
         )
     )
+
+    # Apply per-phase wall-clock timings where available (keyed by step name).
+    if timings:
+        for step in steps:
+            if step.name in timings:
+                step.duration_ms = round(timings[step.name], 1)
 
     return steps
 

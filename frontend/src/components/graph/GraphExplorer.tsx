@@ -51,6 +51,7 @@ interface FGNode {
   type: string;
   filtered_out: boolean;
   on_filter_path: boolean;
+  excluded_by?: { injury: string; joint: string; reason: string }[];
   // layout fields added by force-graph
   x?: number;
   y?: number;
@@ -126,6 +127,7 @@ export function GraphExplorer({ memberId }: GraphExplorerProps) {
         type: n.type,
         filtered_out: n.filtered_out,
         on_filter_path: n.on_filter_path,
+        excluded_by: n.excluded_by ?? [],
       }));
 
     const nodeIdSet = new Set(filteredNodes.map((n) => n.id));
@@ -345,6 +347,26 @@ export function GraphExplorer({ memberId }: GraphExplorerProps) {
           </div>
         )}
 
+        {/* Active injuries driving the filter — named so exclusions are attributable */}
+        {memberId && showMemberFilter && (payload?.member_injuries?.length ?? 0) > 0 && (
+          <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-red-700 mb-1">
+              Filtering for {payload!.member_injuries!.length === 1 ? "injury" : "injuries"}
+            </p>
+            <ul className="space-y-0.5">
+              {payload!.member_injuries!.map((inj) => (
+                <li key={inj.joint} className="flex items-center gap-1.5 text-xs text-red-800">
+                  <span className="h-1.5 w-1.5 rounded-full bg-red-500 flex-shrink-0" />
+                  <span className="font-medium">{inj.label}</span>
+                  {inj.healing_phase && (
+                    <span className="text-red-500">· {inj.healing_phase}</span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
         {/* Node type filters */}
         <div className="space-y-1">
           <p className="text-xs text-slate-500 font-medium">Node types</p>
@@ -477,10 +499,29 @@ export function GraphExplorer({ memberId }: GraphExplorerProps) {
               </button>
             </div>
 
-            {/* Filtered out reason */}
+            {/* Filtered out — name the specific injury(ies) + graph reason */}
             {showMemberFilter && selectedNode.filtered_out && (
-              <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700 mb-3">
-                Excluded by safety filter for the active member's injury.
+              <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2 mb-3">
+                {(selectedNode.excluded_by?.length ?? 0) > 0 ? (
+                  <>
+                    <p className="text-xs font-semibold text-red-700 mb-1">
+                      Excluded by safety filter — injury:
+                    </p>
+                    <ul className="space-y-1.5">
+                      {selectedNode.excluded_by!.map((ex, i) => (
+                        <li key={i} className="text-xs text-red-800">
+                          <span className="font-medium">{ex.injury}</span>
+                          <span className="block text-red-600 mt-0.5">{ex.reason}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </>
+                ) : (
+                  <p className="text-xs text-red-700">
+                    Excluded by safety filter (equipment, preference, or explicit
+                    exclusion — not injury-related).
+                  </p>
+                )}
               </div>
             )}
 

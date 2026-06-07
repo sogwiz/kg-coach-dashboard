@@ -19,14 +19,23 @@ import { useState, useCallback } from "react";
 import {
   postGenerate,
   postGenerateSelect,
+  postRegenerate,
+  streamGenerate,
   type WorkoutVariant,
   type TraceSummary,
   type DecisionStep,
   type InjuryState,
+  type GenStatusEvent,
 } from "../lib/api";
 
 interface UseGeneratorResult {
-  generate: (prompt: string, minutes: number) => Promise<void>;
+  generate: (prompt: string, minutes: number) => Promise<boolean>;
+  generateStream: (
+    prompt: string,
+    minutes: number,
+    engine?: "hybrid" | "llm"
+  ) => Promise<boolean>;
+  regenerate: (adjustment?: string) => Promise<boolean>;
   selectVariant: (variantId: string) => Promise<void>;
   variants: WorkoutVariant[];
   selectedVariant: WorkoutVariant | null;
@@ -34,6 +43,7 @@ interface UseGeneratorResult {
   decisionTrace: DecisionStep[];
   injuryStateUsed: InjuryState | null;
   loading: boolean;
+  genStatus: GenStatusEvent | null;
   error: string | null;
   llmUnconfigured: boolean;
   reset: () => void;
@@ -45,6 +55,7 @@ export function useGenerator(memberId: string | null): UseGeneratorResult {
   const [traceSummary, setTraceSummary] = useState<TraceSummary | null>(null);
   const [decisionTrace, setDecisionTrace] = useState<DecisionStep[]>([]);
   const [loading, setLoading] = useState(false);
+  const [genStatus, setGenStatus] = useState<GenStatusEvent | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [llmUnconfigured, setLlmUnconfigured] = useState(false);
 
@@ -53,13 +64,72 @@ export function useGenerator(memberId: string | null): UseGeneratorResult {
     setSelectedVariantId(null);
     setTraceSummary(null);
     setDecisionTrace([]);
+    setGenStatus(null);
     setError(null);
     setLlmUnconfigured(false);
   }, []);
 
+  const generateStream = useCallback(
+    async (
+      prompt: string,
+      minutes: number,
+      engine: "hybrid" | "llm" = "hybrid"
+    ): Promise<boolean> => {
+      if (!memberId) return false;
+      setLoading(true);
+      setError(null);
+      setLlmUnconfigured(false);
+      setVariants([]);
+      setSelectedVariantId(null);
+      setGenStatus(null);
+
+      let ok = false;
+      try {
+        await streamGenerate(
+          prompt,
+          minutes,
+          memberId,
+          (ev) => {
+            const type = ev.type as string;
+          if (type === "status") {
+            setGenStatus(ev as unknown as GenStatusEvent);
+          } else if (type === "complete") {
+            const o = ev.output as {
+              variants: WorkoutVariant[];
+              trace_summary: TraceSummary;
+              decision_trace?: DecisionStep[];
+              selected_variant_id: string | null;
+            };
+            setVariants(o.variants);
+            setTraceSummary(o.trace_summary);
+            setDecisionTrace(o.decision_trace ?? []);
+            setSelectedVariantId(o.selected_variant_id);
+            ok = true;
+          } else if (type === "error") {
+            if (ev.status === 503) {
+              setLlmUnconfigured(true);
+              setError("LLM not configured — set ANTHROPIC_API_KEY and restart the server.");
+            } else {
+              setError((ev.detail as string) ?? "Generation failed");
+            }
+          }
+          },
+          engine
+        );
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setLoading(false);
+        setGenStatus(null);
+      }
+      return ok;
+    },
+    [memberId]
+  );
+
   const generate = useCallback(
-    async (prompt: string, minutes: number) => {
-      if (!memberId) return;
+    async (prompt: string, minutes: number): Promise<boolean> => {
+      if (!memberId) return false;
       setLoading(true);
       setError(null);
       setLlmUnconfigured(false);
@@ -72,6 +142,7 @@ export function useGenerator(memberId: string | null): UseGeneratorResult {
         setTraceSummary(output.trace_summary);
         setDecisionTrace(output.decision_trace ?? []);
         setSelectedVariantId(output.selected_variant_id);
+        return true;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         if (msg.includes("503")) {
@@ -80,6 +151,37 @@ export function useGenerator(memberId: string | null): UseGeneratorResult {
         } else {
           setError(msg);
         }
+        return false;
+      } finally {
+        setLoading(false);
+      }
+    },
+    [memberId]
+  );
+
+  const regenerate = useCallback(
+    async (adjustment?: string): Promise<boolean> => {
+      if (!memberId) return false;
+      setLoading(true);
+      setError(null);
+      setLlmUnconfigured(false);
+
+      try {
+        const output = await postRegenerate(memberId, adjustment);
+        setVariants(output.variants);
+        setTraceSummary(output.trace_summary);
+        setDecisionTrace(output.decision_trace ?? []);
+        setSelectedVariantId(output.selected_variant_id);
+        return true;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes("503")) {
+          setLlmUnconfigured(true);
+          setError("LLM not configured — set ANTHROPIC_API_KEY and restart the server.");
+        } else {
+          setError(msg);
+        }
+        return false;
       } finally {
         setLoading(false);
       }
@@ -124,7 +226,10 @@ export function useGenerator(memberId: string | null): UseGeneratorResult {
 
   return {
     generate,
+    generateStream,
+    regenerate,
     selectVariant,
+    genStatus,
     variants,
     selectedVariant,
     traceSummary,
