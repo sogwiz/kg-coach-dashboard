@@ -61,9 +61,9 @@ class TestHybridLoad:
         )
 
     def test_hybrid_exercise_count(self, hybrid_exercises):
-        """Exactly 20 hybrid exercises (hyb-001 through hyb-020)."""
-        assert len(hybrid_exercises) == 20, (
-            f"Expected 20 hybrid exercises, got {len(hybrid_exercises)}"
+        """Exactly 21 hybrid exercises (hyb-001 through hyb-021, including Ball Slam)."""
+        assert len(hybrid_exercises) == 21, (
+            f"Expected 21 hybrid exercises, got {len(hybrid_exercises)}"
         )
 
     def test_base_exercises_still_present(self, exercises):

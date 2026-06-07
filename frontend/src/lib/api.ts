@@ -398,6 +398,43 @@ export async function fetchGraph(memberId?: string | null): Promise<GraphPayload
 }
 
 // ---------------------------------------------------------------------------
+// Exercises types + endpoint (Phase 13 — Creative Canvas)
+// ---------------------------------------------------------------------------
+
+/**
+ * Mirrors backend ExerciseItem (exercises.py).
+ * Fields: id, name, movement_patterns, muscle_groups, equipment_required,
+ *         joints_loaded, priority_tier, contraindicated
+ */
+export interface ExerciseItem {
+  id: string;
+  name: string;
+  movement_patterns: string[];
+  muscle_groups: string[];
+  equipment_required: string[];
+  joints_loaded: string[];
+  priority_tier: number;
+  contraindicated: boolean;
+}
+
+export interface ExerciseListResponse {
+  exercises: ExerciseItem[];
+  total: number;
+  member_id: string | null;
+}
+
+export async function fetchExercises(params?: {
+  search?: string;
+  memberId?: string;
+}): Promise<ExerciseListResponse> {
+  const qs = new URLSearchParams();
+  if (params?.search) qs.set("search", params.search);
+  if (params?.memberId) qs.set("member_id", params.memberId);
+  const query = qs.toString() ? `?${qs.toString()}` : "";
+  return apiFetch<ExerciseListResponse>(`/api/exercises${query}`);
+}
+
+// ---------------------------------------------------------------------------
 // Copilot endpoints
 // ---------------------------------------------------------------------------
 

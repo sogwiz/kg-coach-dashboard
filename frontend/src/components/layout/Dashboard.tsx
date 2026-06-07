@@ -3,12 +3,17 @@
  *
  * Structure:
  *   - Sidebar: coach profile / logout, member switcher
- *   - Main: tabs for member overview (Phase 8), generator (Phase 9), copilot (Phase 10)
+ *   - Main: tabs for member overview (Phase 8), generator (Phase 9),
+ *           copilot (Phase 10), graph (Phase 10), creative (Phase 13)
  *
- * The generator tab is keyed off the active member_id via useGenerator.
+ * Phase 13 additions:
+ *   - Generator tab: revised VariantChooser (single-workout + modality
+ *     selector + Regenerate + Send to Canvas)
+ *   - Creative tab: CreativeCanvas (n8n-style builder)
+ *   - "Send to Canvas" in VariantChooser switches to the Creative tab
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../../state/auth";
 import { useMembers } from "../../hooks/useMembers";
 import { useActiveMember } from "../../state/activeMember";
@@ -28,8 +33,9 @@ import { ProvenanceTrace } from "../generator/ProvenanceTrace";
 import { DecisionTrace } from "../generator/DecisionTrace";
 import { CopilotPanel } from "../copilot/CopilotPanel";
 import { GraphExplorer } from "../graph/GraphExplorer";
+import { CreativeCanvas } from "../creative/CreativeCanvas";
 
-type Tab = "overview" | "generator" | "copilot" | "graph";
+type Tab = "overview" | "generator" | "copilot" | "graph" | "creative";
 
 export function Dashboard() {
   const { coach, logout } = useAuth();
@@ -99,6 +105,35 @@ export function Dashboard() {
     }
   };
 
+  // Regenerate — re-runs the last prompt (or a fresh generate from the panel).
+  // Since we don't store the last prompt here, the Regenerate button in
+  // VariantChooser triggers a re-generate by re-calling generate() with the
+  // same parameters.  We keep track of the last generate call args.
+  const lastGenerateArgsRef = useState<{ prompt: string; minutes: number }>({
+    prompt: "",
+    minutes: 45,
+  });
+  const lastGenerateArgs = lastGenerateArgsRef[0];
+  const setLastGenerateArgs = lastGenerateArgsRef[1];
+
+  const handleGenerate = useCallback(
+    async (prompt: string, minutes: number) => {
+      setLastGenerateArgs({ prompt, minutes });
+      await generate(prompt, minutes);
+    },
+    [generate, setLastGenerateArgs]
+  );
+
+  const handleRegenerate = useCallback(async () => {
+    if (!lastGenerateArgs.prompt) return;
+    await generate(lastGenerateArgs.prompt, lastGenerateArgs.minutes);
+  }, [generate, lastGenerateArgs]);
+
+  /** Switch to Creative tab after "Send to Canvas" */
+  const handleSendToCanvas = useCallback(() => {
+    setActiveTab("creative");
+  }, []);
+
   // Most recent adherence %
   const adherenceWeeks = memberCtx?.adherence?.weekly_completion_pct ?? [];
   const lastAdherencePct =
@@ -108,9 +143,10 @@ export function Dashboard() {
 
   const TABS: { id: Tab; label: string }[] = [
     { id: "overview", label: "Overview" },
-    { id: "generator", label: "Workout Generator" },
+    { id: "generator", label: "Generator" },
     { id: "copilot", label: "AI Copilot" },
     { id: "graph", label: "Graph Explorer" },
+    { id: "creative", label: "Creative" },
   ];
 
   return (
@@ -178,7 +214,7 @@ export function Dashboard() {
             <p className="text-slate-400 text-sm">Select a member to begin.</p>
           </div>
         ) : (
-          <div className="max-w-4xl mx-auto px-6 py-6 space-y-6">
+          <div className="max-w-5xl mx-auto px-6 py-6 space-y-6">
             {/* Member header */}
             <MemberHeader
               member={activeMember}
@@ -237,7 +273,6 @@ export function Dashboard() {
                     <p className="text-sm text-slate-400">Loading injury data...</p>
                   </div>
                 ) : null}
-
               </div>
             )}
 
@@ -254,7 +289,8 @@ export function Dashboard() {
                     </h3>
                     <p className="text-xs text-slate-400 mt-0.5">
                       Describe the session intent. The system applies the safety
-                      filter once and returns 3 labeled variants.
+                      filter once and returns 3 labeled variants. Use the
+                      modality selector to switch which plan is shown.
                     </p>
                   </div>
 
@@ -287,23 +323,19 @@ export function Dashboard() {
                   )}
 
                   <GeneratorPanel
-                    onGenerate={generate}
+                    onGenerate={handleGenerate}
                     loading={genLoading}
                     disabled={false}
                   />
                 </div>
 
-                {/* Variant chooser — only shown when variants are available */}
+                {/* Variant chooser — single-workout view (Phase 13) */}
                 {variants.length > 0 && (
                   <div className="space-y-4">
-                    <h3 className="text-sm font-semibold text-slate-700">
-                      Choose a variant
-                    </h3>
-
                     {/* Stale check-in warning at results level too */}
                     {(traceSummary?.stale_check_in ||
-                      injuryStateUsed !== null &&
-                        variants[0]?.provenance?.stale_check_in) && (
+                      (injuryStateUsed !== null &&
+                        variants[0]?.provenance?.stale_check_in)) && (
                       <InjuryWarning
                         lastCheckIn={injuryStateUsed}
                         staleCheckIn={true}
@@ -316,6 +348,9 @@ export function Dashboard() {
                       selectedVariant={selectedVariant}
                       isSelecting={isSelecting}
                       onSelect={handleSelectVariant}
+                      onRegenerate={handleRegenerate}
+                      onSendToCanvas={handleSendToCanvas}
+                      generatorLoading={genLoading}
                     />
 
                     {/* Safety filter provenance */}
@@ -353,6 +388,28 @@ export function Dashboard() {
             {/* ---------------------------------------------------------- */}
             {activeTab === "graph" && (
               <GraphExplorer memberId={activeMember?.member_id ?? null} />
+            )}
+
+            {/* ---------------------------------------------------------- */}
+            {/* Creative Canvas tab (Phase 13)                              */}
+            {/* ---------------------------------------------------------- */}
+            {activeTab === "creative" && (
+              <div className="space-y-4">
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-800">
+                    Creative Canvas
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Compose a session from scratch by adding exercises from the
+                    catalog, or click "Send to Canvas" from a generated plan to
+                    pre-populate. Drag cards to reorder; edit stimulus,
+                    intensity, sets × reps, rest, and notes per exercise.
+                    Safety warnings appear for any exercise contraindicated for{" "}
+                    {activeMember.name}.
+                  </p>
+                </div>
+                <CreativeCanvas memberId={activeMember?.member_id ?? null} />
+              </div>
             )}
           </div>
         )}

@@ -318,5 +318,21 @@
     "supports_weight": false,
     "estimated_rep_duration": 8.0,
     "bilateral_pair_id": null
+  },
+  {
+    "id": "hyb-021",
+    "name": "Ball Slam",
+    "muscle_groups": ["core", "deltoids", "lats", "glutes", "hamstrings", "lower back"],
+    "joints_loaded": ["shoulder", "lumbar spine", "hip", "knee"],
+    "movement_patterns": ["total body", "cardio - plyometric", "core - rotation"],
+    "equipment_required": ["Medicine Ball"],
+    "is_bilateral": true,
+    "side": null,
+    "priority_tier": 1,
+    "is_reps": true,
+    "is_duration": true,
+    "supports_weight": false,
+    "estimated_rep_duration": 3.0,
+    "bilateral_pair_id": null
   }
 ]

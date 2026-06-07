@@ -1,139 +1,68 @@
 /**
- * VariantChooser — renders the 3 returned variants as cards side-by-side.
+ * VariantChooser (Phase 13 revision) — single-workout view with modality selector.
  *
- * Each card is headed by its optimizes_for / stimulus label.
- * Selecting a card calls POST /api/generate/select; the selected variant then
- * expands into the full PlanDisplay below the chooser.
+ * Instead of showing all 3 variants side-by-side, shows ONE workout at a
+ * time. A compact modality selector (strength / conditioning / mobility) at
+ * the top lets the coach switch which variant is displayed.
+ *
+ * Selecting a modality calls POST /api/generate/select (records the choice
+ * for the Copilot). The selected variant's full PlanDisplay is shown below
+ * (ordered exercises + sequencing_role chips + "why here" rationale +
+ * sequence_logic + provenance/decision traces — unchanged from Phase 9).
+ *
+ * "Regenerate" button at the bottom re-runs the generator (passed in as a
+ * callback from Dashboard).
+ *
+ * "Send to Canvas" pushes the currently displayed variant's exercises into
+ * the shared creative canvas state and switches to the Creative tab.
  */
 
+import { useState, useEffect } from "react";
 import type { WorkoutVariant } from "../../lib/api";
 import { PlanDisplay } from "./PlanDisplay";
+import { pushToCanvas } from "../../state/canvas";
 
 // ---------------------------------------------------------------------------
-// Variant accent colours
+// Modality accent colours
 // ---------------------------------------------------------------------------
 
 const VARIANT_STYLES: Record<
   string,
-  { border: string; header: string; badge: string; pill: string }
+  { border: string; header: string; badge: string; activeTab: string; inactiveTab: string }
 > = {
   strength: {
     border: "border-indigo-300",
     header: "bg-indigo-600",
-    badge:  "bg-indigo-100 text-indigo-700",
-    pill:   "bg-indigo-600 text-white hover:bg-indigo-700",
+    badge: "bg-indigo-100 text-indigo-700",
+    activeTab: "bg-indigo-600 text-white",
+    inactiveTab: "text-indigo-600 hover:bg-indigo-50 border border-indigo-200",
   },
   conditioning: {
     border: "border-orange-300",
     header: "bg-orange-500",
-    badge:  "bg-orange-100 text-orange-700",
-    pill:   "bg-orange-500 text-white hover:bg-orange-600",
+    badge: "bg-orange-100 text-orange-700",
+    activeTab: "bg-orange-500 text-white",
+    inactiveTab: "text-orange-600 hover:bg-orange-50 border border-orange-200",
   },
   mobility: {
     border: "border-green-300",
     header: "bg-green-600",
-    badge:  "bg-green-100 text-green-700",
-    pill:   "bg-green-600 text-white hover:bg-green-700",
+    badge: "bg-green-100 text-green-700",
+    activeTab: "bg-green-600 text-white",
+    inactiveTab: "text-green-600 hover:bg-green-50 border border-green-200",
   },
 };
 
 const DEFAULT_STYLE = {
   border: "border-slate-300",
   header: "bg-slate-500",
-  badge:  "bg-slate-100 text-slate-600",
-  pill:   "bg-slate-600 text-white hover:bg-slate-700",
+  badge: "bg-slate-100 text-slate-600",
+  activeTab: "bg-slate-600 text-white",
+  inactiveTab: "text-slate-600 hover:bg-slate-50 border border-slate-200",
 };
 
 function variantStyle(variantId: string) {
   return VARIANT_STYLES[variantId] ?? DEFAULT_STYLE;
-}
-
-// ---------------------------------------------------------------------------
-// VariantCard
-// ---------------------------------------------------------------------------
-
-interface VariantCardProps {
-  variant: WorkoutVariant;
-  isSelected: boolean;
-  isSelecting: boolean;
-  onSelect: (variantId: string) => void;
-}
-
-function VariantCard({
-  variant,
-  isSelected,
-  isSelecting,
-  onSelect,
-}: VariantCardProps) {
-  const s = variantStyle(variant.variant_id);
-
-  return (
-    <div
-      className={`flex-1 min-w-0 rounded-xl border-2 overflow-hidden transition-all ${
-        isSelected ? s.border + " ring-2 ring-offset-1 ring-indigo-300" : "border-slate-200"
-      }`}
-    >
-      {/* Card header */}
-      <div className={`${s.header} px-4 py-3`}>
-        <p className="text-xs font-bold text-white/70 uppercase tracking-wide">
-          {variant.variant_id}
-        </p>
-        <h4 className="text-sm font-semibold text-white leading-tight mt-0.5">
-          {variant.label}
-        </h4>
-      </div>
-
-      {/* Card body */}
-      <div className="p-4 space-y-3 bg-white">
-        {/* Optimizes-for pill */}
-        <span
-          className={`inline-block text-xs font-medium px-2.5 py-1 rounded-full ${s.badge}`}
-        >
-          {variant.optimizes_for}
-        </span>
-
-        {/* Key stats */}
-        <div className="grid grid-cols-2 gap-2 text-xs text-slate-600">
-          <div>
-            <span className="font-semibold text-slate-500">Duration</span>
-            <br />
-            {variant.plan.total_minutes} min
-          </div>
-          <div>
-            <span className="font-semibold text-slate-500">Exercises</span>
-            <br />
-            {
-              variant.plan.warmup.length +
-              variant.plan.main.length +
-              variant.plan.cooldown.length
-            }{" "}
-            total
-          </div>
-        </div>
-
-        {/* Stimulus teaser */}
-        {variant.plan.stimulus && (
-          <p className="text-xs text-slate-600 leading-relaxed line-clamp-2">
-            {variant.plan.stimulus}
-          </p>
-        )}
-
-        {/* Select button */}
-        <button
-          type="button"
-          disabled={isSelecting}
-          onClick={() => onSelect(variant.variant_id)}
-          className={`w-full rounded-lg py-2 text-xs font-semibold transition-colors ${
-            isSelected
-              ? s.pill + " opacity-90 cursor-default"
-              : "border border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50"
-          } disabled:opacity-60`}
-        >
-          {isSelected ? "Selected" : isSelecting ? "Selecting..." : "Select this variant"}
-        </button>
-      </div>
-    </div>
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -145,6 +74,10 @@ interface VariantChooserProps {
   selectedVariant: WorkoutVariant | null;
   isSelecting: boolean;
   onSelect: (variantId: string) => void;
+  onRegenerate: () => void;
+  /** Called after "Send to Canvas" so Dashboard can switch to the Creative tab */
+  onSendToCanvas?: () => void;
+  generatorLoading?: boolean;
 }
 
 export function VariantChooser({
@@ -152,44 +85,207 @@ export function VariantChooser({
   selectedVariant,
   isSelecting,
   onSelect,
+  onRegenerate,
+  onSendToCanvas,
+  generatorLoading = false,
 }: VariantChooserProps) {
+  // The modality currently displayed — defaults to the selected variant (if
+  // any) or the first variant returned.
+  const [displayedId, setDisplayedId] = useState<string>(
+    selectedVariant?.variant_id ?? variants[0]?.variant_id ?? ""
+  );
+
+  // Keep displayed in sync when selectedVariant changes externally (e.g. after
+  // /api/generate/select returns a different selection).
+  useEffect(() => {
+    if (selectedVariant?.variant_id) {
+      setDisplayedId(selectedVariant.variant_id);
+    }
+  }, [selectedVariant?.variant_id]);
+
+  const displayedVariant =
+    variants.find((v) => v.variant_id === displayedId) ?? variants[0] ?? null;
+
+  if (!displayedVariant) return null;
+
+  const s = variantStyle(displayedVariant.variant_id);
+
+  const handleModalityClick = (variantId: string) => {
+    setDisplayedId(variantId);
+    // Record choice for the Copilot
+    onSelect(variantId);
+  };
+
+  const handleSendToCanvas = () => {
+    if (!displayedVariant) return;
+    // Collect all exercises in order: warmup → main → cooldown
+    const allExercises = [
+      ...displayedVariant.plan.warmup,
+      ...displayedVariant.plan.main,
+      ...displayedVariant.plan.cooldown,
+    ].sort((a, b) => a.order - b.order);
+    pushToCanvas(allExercises);
+    if (onSendToCanvas) onSendToCanvas();
+  };
+
   return (
-    <div className="space-y-6">
-      {/* 3 cards side-by-side */}
-      <div className="flex gap-4 flex-wrap lg:flex-nowrap">
-        {variants.map((v) => (
-          <VariantCard
-            key={v.variant_id}
-            variant={v}
-            isSelected={selectedVariant?.variant_id === v.variant_id}
-            isSelecting={isSelecting}
-            onSelect={onSelect}
-          />
-        ))}
+    <div className="space-y-4">
+      {/* ------------------------------------------------------------------ */}
+      {/* Modality selector — compact pill row                                */}
+      {/* ------------------------------------------------------------------ */}
+      <div>
+        <p className="text-xs text-slate-500 mb-2 font-medium">
+          Select modality to view:
+        </p>
+        <div className="flex gap-2 flex-wrap">
+          {variants.map((v) => {
+            const vs = variantStyle(v.variant_id);
+            const isDisplayed = v.variant_id === displayedId;
+            return (
+              <button
+                key={v.variant_id}
+                type="button"
+                disabled={isSelecting}
+                onClick={() => handleModalityClick(v.variant_id)}
+                className={`px-4 py-1.5 rounded-full text-xs font-semibold transition-colors ${
+                  isDisplayed ? vs.activeTab : vs.inactiveTab
+                } disabled:opacity-60`}
+              >
+                {v.label}
+                {v.variant_id === selectedVariant?.variant_id && (
+                  <span className="ml-1.5 opacity-80">✓</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+        {selectedVariant && (
+          <p className="text-[10px] text-slate-400 mt-1.5">
+            Copilot-selected:{" "}
+            <span className="font-medium text-slate-600">
+              {selectedVariant.label}
+            </span>
+          </p>
+        )}
       </div>
 
-      {/* Expanded plan display for the selected variant */}
-      {selectedVariant && (
-        <div className="rounded-xl border border-slate-200 bg-slate-50 p-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <h4 className="text-sm font-semibold text-slate-700">
-              {selectedVariant.label} — Full Plan
+      {/* ------------------------------------------------------------------ */}
+      {/* Full plan display for the displayed variant                          */}
+      {/* ------------------------------------------------------------------ */}
+      <div className={`rounded-xl border-2 overflow-hidden ${s.border}`}>
+        {/* Plan header */}
+        <div className={`${s.header} px-5 py-3 flex items-center justify-between`}>
+          <div>
+            <p className="text-xs font-bold text-white/70 uppercase tracking-wide">
+              {displayedVariant.variant_id}
+            </p>
+            <h4 className="text-sm font-semibold text-white leading-tight mt-0.5">
+              {displayedVariant.label}
             </h4>
-            <span
-              className={`text-xs font-medium px-2.5 py-1 rounded-full ${
-                variantStyle(selectedVariant.variant_id).badge
-              }`}
-            >
-              {selectedVariant.variant_id}
-            </span>
           </div>
+          <span className="text-xs text-white/80 font-medium">
+            {displayedVariant.plan.total_minutes} min ·{" "}
+            {displayedVariant.plan.warmup.length +
+              displayedVariant.plan.main.length +
+              displayedVariant.plan.cooldown.length}{" "}
+            exercises
+          </span>
+        </div>
 
+        {/* Optimizes-for pill */}
+        <div className="px-5 pt-4 pb-0">
+          <span className={`inline-block text-xs font-medium px-2.5 py-1 rounded-full ${s.badge}`}>
+            {displayedVariant.optimizes_for}
+          </span>
+        </div>
+
+        {/* Plan body */}
+        <div className="px-5 pb-5 pt-4">
           <PlanDisplay
-            plan={selectedVariant.plan}
-            loadCapPct={selectedVariant.provenance.load_tolerance_pct}
+            plan={displayedVariant.plan}
+            loadCapPct={displayedVariant.provenance.load_tolerance_pct}
           />
         </div>
-      )}
+
+        {/* ---------------------------------------------------------------- */}
+        {/* Footer actions: Send to Canvas + Regenerate                       */}
+        {/* ---------------------------------------------------------------- */}
+        <div className="px-5 py-4 border-t border-slate-200 bg-slate-50 flex items-center gap-3 flex-wrap">
+          {/* Send to Canvas */}
+          <button
+            type="button"
+            onClick={handleSendToCanvas}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold bg-slate-700 text-white hover:bg-slate-900 transition-colors"
+          >
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 12 12"
+              fill="none"
+              className="flex-shrink-0"
+            >
+              <path
+                d="M1 6h10M6 1l5 5-5 5"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+            Send to Canvas
+          </button>
+
+          <span className="flex-1" />
+
+          {/* Regenerate */}
+          <button
+            type="button"
+            onClick={onRegenerate}
+            disabled={generatorLoading || isSelecting}
+            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold bg-indigo-600 text-white hover:bg-indigo-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {generatorLoading ? (
+              <>
+                <svg
+                  className="animate-spin"
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                >
+                  <circle
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="3"
+                    strokeDasharray="30 70"
+                  />
+                </svg>
+                Generating…
+              </>
+            ) : (
+              <>
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 12 12"
+                  fill="none"
+                >
+                  <path
+                    d="M10.5 2A5.5 5.5 0 1 1 6.5 1M10.5 2V5M10.5 2H7.5"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                Regenerate
+              </>
+            )}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

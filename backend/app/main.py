@@ -9,7 +9,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routes import auth, copilot, generator, graph, injury, members
+from app.api.routes import auth, copilot, exercises, generator, graph, injury, members
 
 app = FastAPI(
     title="KG Coach Dashboard API",
@@ -43,3 +43,4 @@ app.include_router(injury.router, prefix="/api")
 app.include_router(generator.router, prefix="/api")
 app.include_router(copilot.router, prefix="/api")
 app.include_router(graph.router, prefix="/api")
+app.include_router(exercises.router, prefix="/api")

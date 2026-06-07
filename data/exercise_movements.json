@@ -596,6 +596,15 @@
         "shoulder": ["flexion", "load"],
         "elbow": ["extension", "load"]
       }
+    },
+    "hyb-021": {
+      "name": "Ball Slam",
+      "joint_movements": {
+        "shoulder": ["flexion", "extension", "load"],
+        "lumbar_spine": ["flexion", "extension", "load"],
+        "hip": ["flexion", "extension", "load"],
+        "knee": ["flexion", "extension", "load"]
+      }
     }
   }
 }
