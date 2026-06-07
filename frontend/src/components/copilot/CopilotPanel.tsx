@@ -43,8 +43,6 @@ export function CopilotPanel({
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const hasInjury = (memberCtx?.injuries?.length ?? 0) > 0;
-
   if (!memberId) {
     return (
       <div className="flex items-center justify-center h-40 text-slate-400 text-sm">
@@ -129,7 +127,8 @@ export function CopilotPanel({
           <QuickPrompts
             onSelect={(p) => send(p)}
             disabled={isStreaming}
-            hasInjury={hasInjury}
+            clientName={memberCtx?.profile.name}
+            injury={memberCtx?.injuries?.[0]?.region ?? null}
           />
         </div>
 

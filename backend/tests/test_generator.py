@@ -1,12 +1,12 @@
 """
-Phase 6 validation: Generator Pipeline + LLM Structuring (3 variants)
+Phase 6 validation: Generator Pipeline + LLM Structuring (single variant)
 
 Tests:
   1. Safety filter integration: no contraindicated exercises appear in the safe
      set for Jordan (knee injury, pain on flexion) or Mico (lumbar injury,
      pain on flexion/load). Runs WITHOUT an API key.
-  2. 3-variant scaffolding: the three variant slots are present with distinct
-     variant_ids; runs WITHOUT an API key using mock LLM.
+  2. Single-variant scaffolding: the generator emits one structured session
+     ("primary"); runs WITHOUT an API key using mock LLM.
   3. Store round-trip: set_current_plan / get_current_plan work correctly with
      the 3-variant GeneratorOutput shape.
   4. select_variant: records the selection and returns the updated output.
@@ -433,35 +433,11 @@ class TestSafetyFilterMico:
 # ---------------------------------------------------------------------------
 
 
-class TestThreeVariantScaffolding:
+class TestVariantScaffolding:
     """
-    Verify the 3-variant structure is correct without requiring a live LLM.
-    We mock the LLM to return a minimal WorkoutPlan for each variant call.
+    The generator emits a SINGLE structured session (variant_id "primary").
+    These tests verify that shape without requiring a live LLM.
     """
-
-    def test_three_distinct_variant_ids(self):
-        """GeneratorOutput must have exactly 3 variants with distinct ids."""
-        output = _make_mock_output()
-        assert len(output.variants) == 3
-        variant_ids = {v.variant_id for v in output.variants}
-        assert variant_ids == {"strength", "conditioning", "mobility"}
-
-    def test_variant_ids_and_labels_match_profile(self):
-        """Each variant id must match the expected label from VARIANT_PROFILES."""
-        from app.generator.pipeline import VARIANT_PROFILES
-        output = _make_mock_output()
-        profile_map = {vid: label for vid, label, _ in VARIANT_PROFILES}
-        for variant in output.variants:
-            assert variant.label == profile_map[variant.variant_id], (
-                f"Variant '{variant.variant_id}' has label '{variant.label}', "
-                f"expected '{profile_map[variant.variant_id]}'"
-            )
-
-    def test_variant_optimizes_for_distinct(self):
-        """All three optimizes_for fields must be distinct."""
-        output = _make_mock_output()
-        opts = [v.optimizes_for for v in output.variants]
-        assert len(set(opts)) == 3, f"Expected 3 distinct optimizes_for, got: {opts}"
 
     def test_no_selected_variant_id_initially(self):
         """selected_variant_id is None when no selection has been made."""
@@ -474,17 +450,17 @@ class TestThreeVariantScaffolding:
         assert output.trace is not None
 
     @pytest.mark.asyncio
-    async def test_generate_workout_produces_three_variants_with_mock_llm(
+    async def test_generate_workout_produces_single_primary_variant(
         self, kg, all_exercises
     ):
         """
-        generate_workout returns a GeneratorOutput with exactly 3 variants
-        when given a mock LLM — no API key needed.
+        generate_workout returns a GeneratorOutput with exactly ONE variant
+        ("primary") when given a mock LLM — no API key needed.
         """
         from app.generator.pipeline import GeneratorInput, generate_workout
         from app.models.plan import PlannedExercise, WorkoutPlan
 
-        # Build a minimal mock plan to return for each variant call
+        # Build a minimal mock plan for the structurer to return
         mock_plan = WorkoutPlan(
             warmup=[],
             main=[
@@ -514,6 +490,7 @@ class TestThreeVariantScaffolding:
             prompt="full body",
             time_window_minutes=45,
             member_id=member.profile.id,
+            engine="llm",
         )
 
         output = await generate_workout(
@@ -523,22 +500,20 @@ class TestThreeVariantScaffolding:
             llm=mock_llm,
         )
 
-        assert len(output.variants) == 3
-        variant_ids = {v.variant_id for v in output.variants}
-        assert variant_ids == {"strength", "conditioning", "mobility"}
+        assert len(output.variants) == 1
+        assert {v.variant_id for v in output.variants} == {"primary"}
         assert output.trace is not None
         assert output.selected_variant_id is None
 
     @pytest.mark.asyncio
-    async def test_all_variants_use_same_safe_set(self, kg, all_exercises):
+    async def test_single_variant_structured_once_from_safe_set(self, kg, all_exercises):
         """
-        All three variants must reference exercises only from the single shared
-        safe set (filter runs once, not three times).
+        The single variant is structured by exactly ONE LLM call over the shared
+        safe set (the filter runs once, the structurer runs once).
         """
         from app.generator.pipeline import GeneratorInput, generate_workout
         from app.models.plan import PlannedExercise, WorkoutPlan
 
-        exercises = load_exercises()
         call_count = {"n": 0}
 
         def _mock_structure(*args, **kwargs):
@@ -573,6 +548,7 @@ class TestThreeVariantScaffolding:
             prompt="test",
             time_window_minutes=45,
             member_id=member.profile.id,
+            engine="llm",
         )
 
         output = await generate_workout(
@@ -582,11 +558,10 @@ class TestThreeVariantScaffolding:
             llm=mock_llm,
         )
 
-        # LLM was called exactly 3 times (once per variant)
-        assert call_count["n"] == 3
-        # There is exactly one shared trace
+        # Structurer called exactly once (single variant), one shared trace.
+        assert call_count["n"] == 1
         assert output.trace is not None
-        assert len(output.variants) == 3
+        assert len(output.variants) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -745,8 +720,8 @@ class TestFullPipeline:
         clear_store()
 
     @pytest.mark.asyncio
-    async def test_generate_workout_returns_three_variants(self, kg):
-        """generate_workout returns a GeneratorOutput with exactly 3 variants."""
+    async def test_generate_workout_returns_single_variant(self, kg):
+        """generate_workout returns a GeneratorOutput with exactly one variant."""
         from app.generator.llm import get_structuring_llm
         from app.generator.pipeline import GeneratorInput, generate_workout
 
@@ -766,9 +741,8 @@ class TestFullPipeline:
             llm=llm,
         )
 
-        assert len(output.variants) == 3
-        variant_ids = {v.variant_id for v in output.variants}
-        assert variant_ids == {"strength", "conditioning", "mobility"}
+        assert len(output.variants) == 1
+        assert {v.variant_id for v in output.variants} == {"primary"}
         assert output.trace is not None
         assert output.selected_variant_id is None
 
@@ -776,7 +750,7 @@ class TestFullPipeline:
     async def test_no_knee_exercises_in_any_variant(self, kg):
         """
         For Jordan, no knee-stressing (flexion) exercise should appear in
-        any of the three generated variants.
+        the generated session.
         """
         from app.generator.llm import get_structuring_llm
         from app.generator.pipeline import GeneratorInput, generate_workout
@@ -811,11 +785,8 @@ class TestFullPipeline:
             )
 
     @pytest.mark.asyncio
-    async def test_variants_have_distinct_stimulus(self, kg):
-        """
-        The three variants should have distinct stimulus fields, since each
-        optimizes for a different goal.
-        """
+    async def test_variant_has_nonempty_stimulus(self, kg):
+        """The generated session's stimulus field must be non-empty."""
         from app.generator.llm import get_structuring_llm
         from app.generator.pipeline import GeneratorInput, generate_workout
 
@@ -902,7 +873,7 @@ class TestFullPipeline:
         stored = get_current_plan(member_id)
 
         assert stored is not None
-        assert len(stored.variants) == 3
+        assert len(stored.variants) == 1
 
 
 # ---------------------------------------------------------------------------
@@ -990,8 +961,8 @@ class TestGeneratorEndpoint:
         clear_store()
 
     @pytest.mark.skipif(not HAS_API_KEY, reason="ANTHROPIC_API_KEY not set")
-    def test_generate_returns_three_variants_with_api_key(self):
-        """With a valid API key, the endpoint returns a JSON object with 3 variants."""
+    def test_generate_returns_single_variant_with_api_key(self):
+        """With a valid API key, the endpoint returns a JSON object with one variant."""
         from fastapi.testclient import TestClient
 
         from app.api.routes import generator as gen_module
@@ -1013,9 +984,9 @@ class TestGeneratorEndpoint:
         data = response.json()
         assert "variants" in data
         assert "trace_summary" in data
-        assert len(data["variants"]) == 3
+        assert len(data["variants"]) == 1
         variant_ids = {v["variant_id"] for v in data["variants"]}
-        assert variant_ids == {"strength", "conditioning", "mobility"}
+        assert variant_ids == {"primary"}
         for v in data["variants"]:
             assert v["plan"]["stimulus"]
             assert v["plan"]["total_minutes"] > 0
@@ -1361,6 +1332,7 @@ class TestMockLLMSequencingOutput:
             prompt="lower body strength",
             time_window_minutes=45,
             member_id=member.profile.id,
+            engine="llm",
         )
 
         output = await generate_workout(
@@ -1370,7 +1342,7 @@ class TestMockLLMSequencingOutput:
             llm=mock_llm,
         )
 
-        assert len(output.variants) == 3
+        assert len(output.variants) == 1
 
         for variant in output.variants:
             plan = variant.plan
@@ -1477,6 +1449,7 @@ class TestMockLLMSequencingOutput:
             prompt="lower body",
             time_window_minutes=40,
             member_id=member.profile.id,
+            engine="llm",
         )
 
         output = await generate_workout(
@@ -1490,7 +1463,7 @@ class TestMockLLMSequencingOutput:
 
         # Top-level structure
         assert "variants" in serialised
-        assert len(serialised["variants"]) == 3
+        assert len(serialised["variants"]) == 1
 
         for v_dict in serialised["variants"]:
             plan_dict = v_dict["plan"]
@@ -1844,7 +1817,7 @@ class TestRefineLLM:
         assert response.status_code == 200
         data = response.json()
         assert "variants" in data
-        assert len(data["variants"]) == 3
+        assert len(data["variants"]) == 1
 
         # Check: no variant plan should include a barbell exercise by name
         for variant in data["variants"]:

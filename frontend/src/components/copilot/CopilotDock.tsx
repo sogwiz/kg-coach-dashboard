@@ -42,7 +42,7 @@ export function CopilotDock({ onOpenGenerator }: CopilotDockProps) {
 
   if (!activeMember) return null;
 
-  const hasInjury = !!activeMember.active_injury;
+  const clientFirstName = activeMember.name.split(" ")[0];
 
   // Event chips jump to the related surface but KEEP the drawer open.
   const handleEventClick = () => {
@@ -155,7 +155,12 @@ export function CopilotDock({ onOpenGenerator }: CopilotDockProps) {
 
             {/* Quick prompts */}
             <div className="border-t border-line px-5 py-3">
-              <QuickPrompts onSelect={(p) => send(p)} disabled={isStreaming} hasInjury={hasInjury} />
+              <QuickPrompts
+                onSelect={(p) => send(p)}
+                disabled={isStreaming}
+                clientName={clientFirstName}
+                injury={activeMember.active_injury}
+              />
             </div>
 
             {/* Composer */}

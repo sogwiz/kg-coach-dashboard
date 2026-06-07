@@ -36,14 +36,20 @@ const ROLE_LABEL: Record<SequencingRole, string> = {
 };
 
 function formatRepsOrDuration(ex: PlannedExercise): string {
-  if (ex.reps != null) return `${ex.sets} × ${ex.reps} reps`;
-  if (ex.duration_seconds != null) {
+  // Pick the one work metric this exercise is prescribed in. Cardio machines
+  // are calories / distance / time — never reps.
+  let work: string | null = null;
+  if (ex.reps != null) work = `${ex.reps} reps`;
+  else if (ex.calories != null) work = `${ex.calories} cal`;
+  else if (ex.distance_meters != null) work = `${ex.distance_meters} m`;
+  else if (ex.duration_seconds != null) {
     const s = ex.duration_seconds;
-    return s >= 60
-      ? `${ex.sets} × ${Math.floor(s / 60)}m${s % 60 > 0 ? `${s % 60}s` : ""}`
-      : `${ex.sets} × ${s}s`;
+    work = s >= 60 ? `${Math.floor(s / 60)}m${s % 60 > 0 ? `${s % 60}s` : ""}` : `${s}s`;
   }
-  return `${ex.sets} sets`;
+
+  let label = work ? `${ex.sets} × ${work}` : `${ex.sets} sets`;
+  if (ex.intensity_pct != null) label += ` @ ${ex.intensity_pct}%`;
+  return label;
 }
 
 function formatRest(sec: number): string {

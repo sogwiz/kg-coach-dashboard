@@ -68,6 +68,21 @@ _TIME_HINTS = (
 )
 _CONDITIONING_PATTERNS = ("cardio", "plyometric", "conditioning", "metabolic")
 _COMPOUND_PATTERNS = ("squat", "hinge", "lunge", "push", "pull", "press", "row", "deadlift", "step-up", "carry")
+
+# Cardio machines / locomotion are prescribed by calories, distance, or time —
+# NEVER by reps ("16 reps on a SkiErg" is meaningless). Detection is by name
+# (ergs, bikes, runners, sleds) and by the catalog's locomotion/cardio patterns.
+_ERG_HINTS = (
+    "erg", "skierg", "ski erg", "rower", "rowing", "concept2", "concept 2",
+    "assault bike", "echo bike", "air bike", "fan bike", "elliptical",
+)
+_LOCOMOTION_HINTS = ("run", "sprint", "treadmill", "sled", "shuttle", "jog")
+_STEADY_HINTS = ("zone 2", "zone-2", "zone2", "z2", "steady", "steady-state", "steady state")
+# Target effort (% of max) for cardio intervals, keyed by inferred mode.
+_MODE_INTENSITY = {
+    "power": 90, "strength": 85, "conditioning": 85,
+    "endurance": 75, "hypertrophy": 80, "mobility": None,
+}
 _ACTIVATION_MUSCLES = {"glutes", "core", "obliques", "rotator cuff", "hip flexors", "scapular"}
 
 _STOPWORDS = {
@@ -101,6 +116,44 @@ def _is_time_based(ex: Exercise) -> bool:
     name = ex.name.lower()
     pats = " ".join(ex.movement_patterns).lower()
     return any(h in name for h in _TIME_HINTS) or "isometric" in pats
+
+
+def _is_cardio_machine(ex: Exercise) -> bool:
+    """True for ergs, bikes, runners, sleds — anything measured in cal/m/time."""
+    name = ex.name.lower()
+    pats = " ".join(ex.movement_patterns).lower()
+    if any(h in name for h in _ERG_HINTS + _LOCOMOTION_HINTS):
+        return True
+    return "cardio" in pats or "locomotion" in pats
+
+
+def _cardio_scheme(ex: Exercise, mode: str, sets: int, rest: int) -> dict:
+    """Prescribe a cardio machine by calories / distance / time + intensity %.
+
+    Ergs (row, ski, bike) → calories; locomotion (run, sled) → meters; generic
+    cardio (jump rope, etc.) → seconds. Zone-2 / steady-state names collapse to
+    one continuous block at a lower effort.
+    """
+    name = ex.name.lower()
+    pats = " ".join(ex.movement_patterns).lower()
+    base = {
+        "sets": sets, "reps": None, "duration_seconds": None,
+        "distance_meters": None, "calories": None, "rest_seconds": rest,
+        "intensity_pct": _MODE_INTENSITY.get(mode, 80),
+    }
+
+    # Steady-state / Zone-2: one continuous block at conversational effort.
+    if any(h in name for h in _STEADY_HINTS) or mode == "endurance":
+        base.update(sets=1, duration_seconds=1200, rest_seconds=0, intensity_pct=65)
+        return base
+
+    if any(h in name for h in _ERG_HINTS):
+        base["calories"] = 12                      # ~12 cal intervals
+    elif any(h in name for h in _LOCOMOTION_HINTS) or "locomotion" in pats:
+        base["distance_meters"] = 200              # 200 m intervals
+    else:
+        base["duration_seconds"] = 40              # generic cardio → time
+    return base
 
 
 def _ex_text(ex: Exercise) -> str:
@@ -153,9 +206,24 @@ def _scheme(mode: str, role: str, ex: Exercise, load_tolerance_pct: float) -> di
     if load_tolerance_pct < 0.7 and sets > 2:
         sets -= 1
 
+    # Cardio machines / locomotion: calories / distance / time + intensity %.
+    if _is_cardio_machine(ex):
+        return _cardio_scheme(ex, mode, sets, rest)
+
+    # Other duration-based work (holds, carries, planks) → time, no intensity %.
     if _is_time_based(ex) or reps is None:
-        return {"sets": sets, "reps": None, "duration_seconds": 40, "rest_seconds": rest}
-    return {"sets": sets, "reps": reps, "duration_seconds": None, "rest_seconds": rest}
+        return {
+            "sets": sets, "reps": None, "duration_seconds": 40,
+            "distance_meters": None, "calories": None,
+            "rest_seconds": rest, "intensity_pct": None,
+        }
+
+    # Resistance work: reps as before (load is governed by the load cap).
+    return {
+        "sets": sets, "reps": reps, "duration_seconds": None,
+        "distance_meters": None, "calories": None,
+        "rest_seconds": rest, "intensity_pct": None,
+    }
 
 
 def _primary_muscle(ex: Exercise) -> str:
@@ -193,7 +261,10 @@ def _make_pe(ex: Exercise, order: int, role: str, scheme: dict, first: bool, las
         sets=scheme["sets"],
         reps=scheme["reps"],
         duration_seconds=scheme["duration_seconds"],
+        distance_meters=scheme.get("distance_meters"),
+        calories=scheme.get("calories"),
         rest_seconds=scheme["rest_seconds"],
+        intensity_pct=scheme.get("intensity_pct"),
         rationale=_rationale(ex, role),
         sequencing_rationale=_sequencing_rationale(role, first, last),
         sequencing_role=role if role in (
@@ -296,7 +367,7 @@ def _compute_distribution(planned: list[PlannedExercise], exercises: list[Exerci
     # crude section inference: warmup/cooldown handled by role
     for pe in planned:
         ex = by_id.get(pe.exercise_id)
-        is_dur = _is_time_based(ex) if ex else (pe.reps is None)
+        is_dur = (_is_time_based(ex) or _is_cardio_machine(ex)) if ex else (pe.reps is None)
         patterns = ex.movement_patterns if ex else []
         section = "cooldown" if pe.sequencing_role == "cooldown" else (
             "warmup" if pe.sequencing_role in ("activation", "primer") else "main"
