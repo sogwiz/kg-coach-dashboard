@@ -556,9 +556,9 @@ The Copilot never invents member data — every fact traces to a KG tool return;
 
 ### One command — Docker (recommended)
 
+From the repository root:
+
 ```bash
-git clone git@github.com:future-research/candidate-assessment.git
-cd candidate-assessment
 cp .env.example .env          # set ANTHROPIC_API_KEY=sk-ant-...
 docker compose up --build     # → http://localhost:8080
 ```
