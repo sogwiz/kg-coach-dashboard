@@ -618,6 +618,191 @@ def goals_and_preferences(member_id: str) -> dict:
     }
 
 
+def injury_progress(member_id: str, injury_id: str, days: int = 14) -> dict:
+    """
+    Return the injury state history with trend analysis for the given injury.
+
+    Shows pain level, inflammation, and load tolerance over the past N days,
+    with a simple trend direction (improving / stable / worsening).
+
+    Parameters
+    ----------
+    member_id: The member's stable id.
+    injury_id: The injury id (e.g. "inj_knee_left").
+    days: Number of days of history to return (default 14).
+
+    Returns a dict with:
+      - member_id, injury_id, region, joint, diagnosis
+      - states: list of {recorded_at, inflammation, pain_on, subjective_pain,
+                          load_tolerance_pct} dicts
+      - trend: "improving" | "stable" | "worsening" based on subjective_pain
+      - current_phase: current healing phase value
+    """
+    from app.data.loader import load_member_context
+    try:
+        member = load_member_context(member_id)
+    except ValueError:
+        return {"error": f"Member '{member_id}' not found"}
+
+    from app.ontology.catalog import build_concept_catalog
+    from app.graph.member_kg import MemberKG
+    concepts = build_concept_catalog()
+    mkg = MemberKG(member, concepts)
+
+    injuries = mkg.get_injuries()
+    target_inj = next((inj for inj in injuries if inj.id == injury_id), None)
+    if target_inj is None:
+        return {"error": f"Injury '{injury_id}' not found for member '{member_id}'"}
+
+    from datetime import datetime, timezone, timedelta
+    cutoff = datetime.now(tz=timezone.utc) - timedelta(days=days)
+
+    states_in_window = [
+        s for s in target_inj.states
+        if s.recorded_at >= cutoff
+    ]
+    states_sorted = sorted(states_in_window, key=lambda s: s.recorded_at)
+
+    state_dicts = [
+        {
+            "recorded_at": s.recorded_at.isoformat(),
+            "inflammation": s.inflammation,
+            "pain_on": s.pain_on,
+            "subjective_pain": s.subjective_pain,
+            "load_tolerance_pct": s.load_tolerance_pct,
+            "notes": s.notes,
+        }
+        for s in states_sorted
+    ]
+
+    # Simple trend analysis based on subjective_pain
+    trend = "stable"
+    if len(states_sorted) >= 2:
+        first_pain = states_sorted[0].subjective_pain
+        last_pain = states_sorted[-1].subjective_pain
+        if last_pain < first_pain - 1:
+            trend = "improving"
+        elif last_pain > first_pain + 1:
+            trend = "worsening"
+
+    return {
+        "member_id": member_id,
+        "member_name": member.profile.name,
+        "injury_id": injury_id,
+        "region": target_inj.region,
+        "joint": target_inj.joint,
+        "diagnosis": target_inj.diagnosis,
+        "days_requested": days,
+        "current_phase": target_inj.computed_phase().value,
+        "days_since_onset": target_inj.days_since_onset(),
+        "states": state_dicts,
+        "trend": trend,
+        "data_source": "Member KG — injury state history",
+    }
+
+
+def healing_phase_explanation(member_id: str, injury_id: str) -> dict:
+    """
+    Explain the current healing phase for the given injury.
+
+    Returns the current phase, its restrictions, load tolerance cap, and
+    expected timeline to the next phase.
+
+    Parameters
+    ----------
+    member_id: The member's stable id.
+    injury_id: The injury id (e.g. "inj_knee_left").
+
+    Returns a dict with:
+      - current_phase, phase_description, restrictions, load_tolerance_cap
+      - days_in_phase, expected_days_in_phase, next_phase
+      - movement_types_excluded, movement_types_allowed
+    """
+    from app.data.loader import load_member_context
+    try:
+        member = load_member_context(member_id)
+    except ValueError:
+        return {"error": f"Member '{member_id}' not found"}
+
+    from app.ontology.catalog import build_concept_catalog
+    from app.graph.member_kg import MemberKG
+    concepts = build_concept_catalog()
+    mkg = MemberKG(member, concepts)
+
+    injuries = mkg.get_injuries()
+    target_inj = next((inj for inj in injuries if inj.id == injury_id), None)
+    if target_inj is None:
+        return {"error": f"Injury '{injury_id}' not found for member '{member_id}'"}
+
+    from app.models.healing import PHASE_RESTRICTIONS, PHASE_THRESHOLDS, HealingPhase
+
+    current_phase = target_inj.computed_phase()
+    days_since_onset = target_inj.days_since_onset()
+
+    # Calculate days in current phase
+    phase_range = PHASE_THRESHOLDS.get(current_phase, (0, 0))
+    days_in_phase = days_since_onset - phase_range[0]
+    expected_days = (
+        phase_range[1] - phase_range[0]
+        if phase_range[1] != float("inf")
+        else None
+    )
+
+    # Determine next phase
+    phase_order = [
+        HealingPhase.ACUTE,
+        HealingPhase.SUBACUTE,
+        HealingPhase.REMODELING,
+        HealingPhase.RETURN_TO_ACTIVITY,
+    ]
+    current_idx = phase_order.index(current_phase)
+    next_phase = (
+        phase_order[current_idx + 1].value
+        if current_idx + 1 < len(phase_order)
+        else None
+    )
+
+    restrictions = PHASE_RESTRICTIONS.get(current_phase, {})
+
+    phase_descriptions = {
+        HealingPhase.ACUTE: (
+            "Acute phase: inflammation management, protection, and passive ROM only. "
+            "No loading or impact allowed."
+        ),
+        HealingPhase.SUBACUTE: (
+            "Subacute phase: tissue repair begins. Gentle ROM and light loading (up to 30%). "
+            "No impact."
+        ),
+        HealingPhase.REMODELING: (
+            "Remodeling phase: tissue strengthening. Progressive loading allowed up to 70%. "
+            "Controlled movements at moderate intensity."
+        ),
+        HealingPhase.RETURN_TO_ACTIVITY: (
+            "Return-to-activity phase: progressive loading toward full capacity. "
+            "Most movements allowed; monitor for symptom flare."
+        ),
+    }
+
+    return {
+        "member_id": member_id,
+        "member_name": member.profile.name,
+        "injury_id": injury_id,
+        "region": target_inj.region,
+        "joint": target_inj.joint,
+        "diagnosis": target_inj.diagnosis,
+        "current_phase": current_phase.value,
+        "phase_description": phase_descriptions.get(current_phase, ""),
+        "days_since_onset": days_since_onset,
+        "days_in_phase": max(0, days_in_phase),
+        "expected_days_in_phase": expected_days,
+        "next_phase": next_phase,
+        "movement_types_excluded": list(restrictions.get("excluded_movement_types", [])),
+        "movement_types_allowed": list(restrictions.get("allowed_movement_types", [])),
+        "max_load_tolerance": restrictions.get("max_load_tolerance", 1.0),
+        "data_source": "Member KG + healing phase model",
+    }
+
+
 def chat_history_search(member_id: str, query: str = "") -> dict:
     """
     Return the member's seed chat history, optionally filtered by a query term.
@@ -704,6 +889,8 @@ TOOL SELECTION GUIDE:
   - Goals / preferences       → goals_and_preferences
   - Chat history / messages   → chat_history_search
   - Workout plan questions    → current_workout_plan
+  - Injury progress / trend   → injury_progress
+  - Healing phase / timeline  → healing_phase_explanation
 
 WORKOUT PLAN: Call `current_workout_plan` whenever the coach mentions:
   - "this workout", "the plan", "the session", "these exercises"
@@ -867,6 +1054,21 @@ def create_copilot_agent(member_kg: "Any", llm: "Any") -> "Any | None":
             or to search for a specific topic in the chat history."""
             return chat_history_search(member_id, query)
 
+        @tool_decorator
+        def injury_progress_tool(member_id: str, injury_id: str, days: int = 14) -> dict:
+            """Return injury state history with trend analysis. Shows pain level,
+            inflammation, and load tolerance over the past N days, with a trend
+            direction (improving/stable/worsening).
+            Call this when asked about injury progress, healing trend, or 'how is my knee/back healing?'"""
+            return injury_progress(member_id, injury_id, days)
+
+        @tool_decorator
+        def healing_phase_explanation_tool(member_id: str, injury_id: str) -> dict:
+            """Explain the current healing phase for the given injury. Returns current phase,
+            restrictions, load tolerance cap, and expected timeline to next phase.
+            Call this when asked about healing phase, injury recovery timeline, or movement restrictions."""
+            return healing_phase_explanation(member_id, injury_id)
+
         tools = [
             adherence_trend_tool,
             morning_brief_tool,
@@ -878,6 +1080,8 @@ def create_copilot_agent(member_kg: "Any", llm: "Any") -> "Any | None":
             workout_history_tool,
             goals_and_preferences_tool,
             chat_history_search_tool,
+            injury_progress_tool,
+            healing_phase_explanation_tool,
         ]
 
         # Rename tools to cleaner names for the LLM
@@ -891,6 +1095,8 @@ def create_copilot_agent(member_kg: "Any", llm: "Any") -> "Any | None":
         workout_history_tool.name = "workout_history"
         goals_and_preferences_tool.name = "goals_and_preferences"
         chat_history_search_tool.name = "chat_history_search"
+        injury_progress_tool.name = "injury_progress"
+        healing_phase_explanation_tool.name = "healing_phase_explanation"
 
         # Compile with MemorySaver for per-member conversation memory (R2)
         checkpointer = MemorySaver()

@@ -337,3 +337,116 @@ export async function postGenerateSelect(
     body: JSON.stringify({ member_id: memberId, variant_id: variantId }),
   });
 }
+
+// ---------------------------------------------------------------------------
+// Graph types (mirrors backend GraphPayload)
+// ---------------------------------------------------------------------------
+
+export interface GraphNode {
+  id: string;
+  label: string;
+  type: string;         // exercise / muscle / joint / pattern / equipment / injury_concept
+  filtered_out: boolean;
+  on_filter_path: boolean;
+}
+
+export interface GraphEdge {
+  source: string;
+  target: string;
+  relation: string;     // stresses / targets / requires / part-of / contraindicated-for
+  on_filter_path: boolean;
+  movement_types: string[];
+}
+
+export interface GraphPayload {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  member_id: string | null;
+  filtered_exercise_ids: string[];
+  filter_path_node_ids: string[];
+}
+
+// ---------------------------------------------------------------------------
+// Copilot / chat types
+// ---------------------------------------------------------------------------
+
+export interface ChatAttachment {
+  type: string;
+  url?: string | null;
+  caption?: string | null;
+}
+
+export interface ChatMessage {
+  ts: string;
+  from: string;          // "member" | "coach"
+  text: string;
+  attachments: ChatAttachment[];
+  // client-side extra fields for rendering
+  role?: "user" | "assistant";
+  isStreaming?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Graph endpoint
+// ---------------------------------------------------------------------------
+
+export async function fetchGraph(memberId?: string | null): Promise<GraphPayload> {
+  const url = memberId
+    ? `/api/graph?member_id=${encodeURIComponent(memberId)}`
+    : "/api/graph";
+  return apiFetch<GraphPayload>(url);
+}
+
+// ---------------------------------------------------------------------------
+// Copilot endpoints
+// ---------------------------------------------------------------------------
+
+export async function fetchChatHistory(memberId: string): Promise<ChatMessage[]> {
+  return apiFetch<ChatMessage[]>(`/api/copilot/members/${memberId}/chat-history`);
+}
+
+/**
+ * Send a message to the copilot (sync endpoint for simplicity).
+ * Falls back to /chat/sync which returns JSON {response: string}.
+ */
+export async function postCopilotSync(
+  memberId: string,
+  message: string,
+  attachments: ChatAttachment[] = []
+): Promise<{ response: string; member_id: string }> {
+  return apiFetch<{ response: string; member_id: string }>("/api/copilot/chat/sync", {
+    method: "POST",
+    body: JSON.stringify({ member_id: memberId, message, attachments }),
+  });
+}
+
+/**
+ * Stream a copilot response via the streaming endpoint.
+ * Returns a ReadableStream<string>. The caller handles chunks.
+ * Throws on non-200 responses.
+ */
+export async function streamCopilot(
+  memberId: string,
+  message: string,
+  attachments: ChatAttachment[] = []
+): Promise<ReadableStreamDefaultReader<string>> {
+  const token = getToken();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const res = await fetch("/api/copilot/chat", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ member_id: memberId, message, attachments }),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`HTTP ${res.status}: ${text}`);
+  }
+
+  const reader = res.body!.pipeThrough(new TextDecoderStream()).getReader();
+  return reader;
+}

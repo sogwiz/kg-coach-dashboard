@@ -26,8 +26,10 @@ import { VariantChooser } from "../generator/VariantChooser";
 import { InjuryWarning } from "../generator/InjuryWarning";
 import { ProvenanceTrace } from "../generator/ProvenanceTrace";
 import { DecisionTrace } from "../generator/DecisionTrace";
+import { CopilotPanel } from "../copilot/CopilotPanel";
+import { GraphExplorer } from "../graph/GraphExplorer";
 
-type Tab = "overview" | "generator";
+type Tab = "overview" | "generator" | "copilot" | "graph";
 
 export function Dashboard() {
   const { coach, logout } = useAuth();
@@ -107,6 +109,8 @@ export function Dashboard() {
   const TABS: { id: Tab; label: string }[] = [
     { id: "overview", label: "Overview" },
     { id: "generator", label: "Workout Generator" },
+    { id: "copilot", label: "AI Copilot" },
+    { id: "graph", label: "Graph Explorer" },
   ];
 
   return (
@@ -234,12 +238,6 @@ export function Dashboard() {
                   </div>
                 ) : null}
 
-                {/* Placeholder for Phase 10 copilot panel */}
-                <div className="bg-white rounded-xl border border-dashed border-slate-300 p-6 text-center">
-                  <p className="text-sm text-slate-400">
-                    Copilot panel — coming in Phase 10
-                  </p>
-                </div>
               </div>
             )}
 
@@ -336,6 +334,25 @@ export function Dashboard() {
                   </div>
                 )}
               </div>
+            )}
+
+            {/* ---------------------------------------------------------- */}
+            {/* Copilot tab                                                 */}
+            {/* ---------------------------------------------------------- */}
+            {activeTab === "copilot" && (
+              <CopilotPanel
+                memberId={activeMember?.member_id ?? null}
+                memberCtx={memberCtx}
+                injuryHistory={injuryHistory}
+                injuryLabel={injury?.region ? `${injury.region} injury` : undefined}
+              />
+            )}
+
+            {/* ---------------------------------------------------------- */}
+            {/* Graph Explorer tab                                          */}
+            {/* ---------------------------------------------------------- */}
+            {activeTab === "graph" && (
+              <GraphExplorer memberId={activeMember?.member_id ?? null} />
             )}
           </div>
         )}
