@@ -52,14 +52,32 @@ class Preferences(BaseModel):
 
 
 class Injury(BaseModel):
+    """
+    Injury record as stored in member-context.json.
+
+    This is the member-level stub that carries both the original thin fields
+    (status, severity, since) and the Phase 5 extensions (onset_date,
+    diagnosis, snomed_code, states).  Fields added in Phase 5 are optional
+    so existing JSON files without them still validate.
+
+    The API layer promotes this to the full app.models.injury.Injury when
+    computing healing phases or building the conditional filter.
+    """
+
     id: str
     region: str
     joint: str
     status: str
     severity: str
-    since: str
+    since: str                          # ISO date string (original field)
+    onset_date: str | None = None       # Phase 5: ISO date (preferred)
+    diagnosis: str | None = None        # Phase 5: human-readable diagnosis
     notes: str | None = None
     snomedct_hint: str | None = None
+    snomed_code: str | None = None      # Phase 5: SNOMED CT code
+    # Phase 5: time series of daily check-in snapshots
+    # Stored as raw dicts here; promoted to InjuryState in API layer
+    states: list[dict] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------

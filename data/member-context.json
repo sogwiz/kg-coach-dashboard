@@ -39,8 +39,31 @@
       "status": "recovering",
       "severity": "mild",
       "since": "2026-05-10",
+      "onset_date": "2026-05-10",
+      "diagnosis": "Patellofemoral pain syndrome — post-hiking flare-up. Cleared for low-impact loading; avoid deep knee flexion under load and plyometrics.",
       "notes": "Patellofemoral pain after a hiking trip. Cleared for low-impact loading; avoid deep knee flexion under load and plyometrics.",
-      "snomedct_hint": "Look up patellofemoral pain syndrome / knee joint structures in SNOMED CT via NCI EVS."
+      "snomedct_hint": "Look up patellofemoral pain syndrome / knee joint structures in SNOMED CT via NCI EVS.",
+      "snomed_code": "57773001",
+      "states": [
+        {
+          "injury_id": "inj_knee_left",
+          "recorded_at": "2026-06-05T08:00:00Z",
+          "inflammation": "mild",
+          "pain_on": ["flexion", "load"],
+          "subjective_pain": 3,
+          "load_tolerance_pct": 0.6,
+          "notes": "Morning stiffness after yesterday's workout. Feels okay at rest."
+        },
+        {
+          "injury_id": "inj_knee_left",
+          "recorded_at": "2026-06-06T08:15:00Z",
+          "inflammation": "none",
+          "pain_on": ["flexion"],
+          "subjective_pain": 2,
+          "load_tolerance_pct": 0.7,
+          "notes": "Feeling better today. Less stiffness. Still cautious on deep flexion."
+        }
+      ]
     }
   ],
   "workout_history": [

@@ -9,6 +9,8 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.routes import injury
+
 app = FastAPI(
     title="KG Coach Dashboard API",
     version="0.1.0",
@@ -33,3 +35,6 @@ app.add_middleware(
 async def health() -> dict[str, str]:
     """Liveness probe — returns {"status": "ok"}."""
     return {"status": "ok"}
+
+
+app.include_router(injury.router, prefix="/api")
