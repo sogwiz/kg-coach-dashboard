@@ -16,16 +16,22 @@ dependencies = [
     "langchain-anthropic>=0.3.0",
     "langchain-openai>=0.2.0",
     "rapidfuzz>=3.10.0",
-    "sentence-transformers>=3.3.0",
     "python-dotenv>=1.0.0",
     "httpx>=0.27.0",
 ]
 
 [project.optional-dependencies]
+# Local semantic embeddings (resolver Pass 3 + embedding RAG).  Pulls in
+# torch (~2 GB+), so it is omitted from size-constrained deployments such as
+# Vercel Lambda, where the code falls back to fuzzy / keyword matching.
+embeddings = [
+    "sentence-transformers>=3.3.0",
+]
 dev = [
     "pytest>=8.3.0",
     "pytest-asyncio>=0.24.0",
     "httpx>=0.27.0",
+    "sentence-transformers>=3.3.0",
 ]
 
 [tool.hatch.build.targets.wheel]

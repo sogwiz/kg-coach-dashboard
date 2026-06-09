@@ -21,24 +21,49 @@ get_model() -> SentenceTransformer
 from __future__ import annotations
 
 import functools
+from typing import TYPE_CHECKING
 
 import numpy as np
-from sentence_transformers import SentenceTransformer
 
 from app.ontology.concepts import Concept
+
+if TYPE_CHECKING:
+    from sentence_transformers import SentenceTransformer
 
 _MODEL_NAME = "all-MiniLM-L6-v2"
 
 
+def embeddings_available() -> bool:
+    """True if the optional sentence-transformers backend can be imported.
+
+    On size-constrained deployments (e.g. Vercel Lambda's 500 MB limit) the
+    heavyweight torch/sentence-transformers stack is omitted.  Callers use this
+    to skip the embedding pass and fall back to fuzzy / keyword matching.
+    """
+    try:
+        import sentence_transformers  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
 @functools.lru_cache(maxsize=1)
-def get_model() -> SentenceTransformer:
+def get_model() -> "SentenceTransformer":
     """
     Load and cache the sentence-transformer model.
 
     The model is loaded once on first call.  Subsequent calls return the
     cached instance.  On a cold start this typically takes 3–15 s depending
     on hardware; subsequent calls are instantaneous.
+
+    Raises
+    ------
+    ImportError
+        If the optional ``sentence-transformers`` dependency is not installed.
+        Callers should gate on :func:`embeddings_available` first.
     """
+    from sentence_transformers import SentenceTransformer
+
     return SentenceTransformer(_MODEL_NAME)
 
 
@@ -63,10 +88,15 @@ def precompute_embeddings(
     Returns
     -------
     corpus : np.ndarray of shape (N, 384)
-        Stacked embeddings for all surface forms.
+        Stacked embeddings for all surface forms.  Empty (shape (0, 384)) when
+        the optional sentence-transformers backend is unavailable, in which case
+        the resolver's embedding pass is skipped.
     concept_ids : list[str] of length N
         concept_ids[i] is the concept_id for corpus[i].
     """
+    if not embeddings_available():
+        return np.empty((0, 384), dtype=np.float32), []
+
     model = get_model()
 
     texts: list[str] = []
