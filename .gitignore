@@ -29,3 +29,4 @@ frontend/.vite/
 /hyb.json
 /llm.json
 /m2.json
+.vercel

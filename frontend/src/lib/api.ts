@@ -1,10 +1,21 @@
 /**
  * Typed fetch wrappers for the KG Coach Dashboard backend API.
  *
- * All requests go through the Vite proxy at /api → localhost:8000.
+ * Locally, requests go through the Vite proxy at /api → localhost:8000.
+ * On Vercel's multi-service deploy, VITE_API_BASE_URL is set to "/_/backend"
+ * so requests reach the backend service's routePrefix (Vercel strips the
+ * prefix, so FastAPI still sees /api/* and /health at its own root).
+ *
  * The auth token (if present) is read from localStorage and sent as
  * an Authorization: Bearer header on every request.
  */
+
+/**
+ * Base URL prepended to every request path. Empty for local dev (the Vite
+ * proxy handles /api and /health); "/_/backend" on Vercel. Trailing slashes
+ * are trimmed so `${API_BASE}/api/...` never produces a double slash.
+ */
+const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/+$/, "");
 
 // ---------------------------------------------------------------------------
 // Shared types (mirrors backend Pydantic models)
@@ -253,7 +264,7 @@ async function apiFetch<T>(
     headers["Authorization"] = `Bearer ${token}`;
   }
 
-  const res = await fetch(path, { ...options, headers });
+  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
@@ -392,7 +403,7 @@ export async function streamGenerate(
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  const res = await fetch("/api/generate/stream", {
+  const res = await fetch(`${API_BASE}/api/generate/stream`, {
     method: "POST",
     headers,
     body: JSON.stringify({
@@ -672,7 +683,7 @@ export async function streamCopilot(
   };
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  const res = await fetch("/api/copilot/chat", {
+  const res = await fetch(`${API_BASE}/api/copilot/chat`, {
     method: "POST",
     headers,
     body: JSON.stringify({
