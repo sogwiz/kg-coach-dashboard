@@ -18,12 +18,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from app.data.paths import find_data_dir
 from app.models.exercise import Exercise
 from app.models.member import MemberContext, MemberSummary
 
-# Root of the repo (two levels up from this file: app/data/loader.py → app → backend → repo)
-_REPO_ROOT = Path(__file__).resolve().parents[3]
-_DATA_DIR = _REPO_ROOT / "data"
+# Seed data directory — resolved by searching upward for the data dir so it
+# works both locally (<repo>/data) and on Vercel's services deploy, where the
+# data is shipped via includeFiles and the filesystem layout may differ.
+_DATA_DIR = find_data_dir()
 
 _EXERCISES_PATH = _DATA_DIR / "exercises.json"
 _HYBRID_EXERCISES_PATH = _DATA_DIR / "exercises.hybrid.json"  # Phase 11 hybrid catalog

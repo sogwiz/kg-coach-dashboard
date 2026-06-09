@@ -1,7 +1,8 @@
 # ── Backend image: FastAPI + Knowledge Graphs + baked-in seed data ───────────
-# Build context is the REPO ROOT (see docker-compose.yml) so we can copy both
-# the backend package and the top-level data/ seed directory, which the loader
-# resolves relative to the repo root (app/data/loader.py → parents[3]).
+# Build context is the REPO ROOT (see docker-compose.yml).  The seed data now
+# lives inside the backend package (backend/data/) so it ships with the backend
+# everywhere — Docker, local, and Vercel's services bundle.  The loader locates
+# it via app.data.paths.find_data_dir() (searches ancestors for a data/ dir).
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
@@ -25,9 +26,9 @@ RUN uv sync --frozen --no-dev --no-install-project
 # First container start takes ~30-60s while it caches the model; subsequent
 # starts reuse the volume and boot fast.
 
-# 2. Application code + seed data (mirrors the repo layout: /app/backend + /app/data)
+# 2. Application code + seed data (backend/ already contains data/, so this
+#    single copy brings both: /app/backend/{app,data,...})
 COPY backend/ ./
-COPY data /app/data
 
 EXPOSE 8000
 CMD ["uv", "run", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

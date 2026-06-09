@@ -26,8 +26,10 @@ from pathlib import Path
 
 import numpy as np
 
-# rag.py → copilot → app → backend → repo root; corpus at <repo>/data/corpus.json
-_CORPUS_PATH = Path(__file__).resolve().parents[3] / "data" / "corpus.json"
+from app.data.paths import find_data_dir
+
+# Corpus lives in the seed data dir (resolved robustly for local + Vercel).
+_CORPUS_PATH = find_data_dir() / "corpus.json"
 
 
 @functools.lru_cache(maxsize=1)

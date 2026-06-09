@@ -2,7 +2,7 @@
 # Open http://localhost:8080  (host port 8080 chosen to avoid colliding with
 # any local dev server on :5173/:8000).
 #
-# Seed data is baked into the backend image (data/ → /app/data), so the stack
+# Seed data is baked into the backend image (backend/data/), so the stack
 # is fully self-contained — no external database required.
 services:
   backend:
